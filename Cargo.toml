@@ -27,6 +27,8 @@ serde_json = "1"
 thiserror = "2"
 # Deterministic key→role hashing across platforms / Python parity.
 sha2 = "0.10"
+# Regex extractor (default offline fact extraction).
+regex = "1.11"
 
 [dev-dependencies]
 # Property-based testing for HLB algebraic invariants.
