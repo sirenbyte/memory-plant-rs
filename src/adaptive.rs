@@ -139,6 +139,20 @@ impl AdaptiveMemory {
     pub fn n_shards(&self) -> usize { self.shards.len() }
     pub fn total_facts(&self) -> usize { self.total_facts }
 
+    /// Extract `(key, vocab_idx)` pairs from a shard in store order.
+    /// Persistence layer uses this to dump deterministic replay data.
+    pub(crate) fn _shard_pairs_impl(&self, shard_idx: usize) -> Vec<(String, usize)> {
+        self.shards
+            .get(shard_idx)
+            .map(|s| {
+                s.keys
+                    .iter()
+                    .filter_map(|k| s.k2v.get(k).map(|&v| (k.clone(), v)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Append a `(key, value)` fact. Overwrites previous value if
     /// `key` already exists — same semantics as a HashMap insert.
     ///

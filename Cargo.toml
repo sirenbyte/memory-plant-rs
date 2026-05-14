@@ -35,6 +35,8 @@ regex = "1.11"
 proptest = "1"
 # Approximate float comparison.
 approx = "0.5"
+# Temp dirs for persistence roundtrip tests.
+tempfile = "3"
 
 [lib]
 name = "memory_plant"

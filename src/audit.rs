@@ -184,6 +184,22 @@ impl AuditTrail {
 
     pub fn len(&self) -> usize { self.in_memory.len() }
     pub fn is_empty(&self) -> bool { self.in_memory.is_empty() }
+    pub fn capacity(&self) -> usize { self.capacity }
+    pub fn counter(&self) -> u64 { self.counter }
+    pub fn preview_chars(&self) -> usize { self.preview_chars }
+
+    /// Restore a previously-saved event sequence. Used by the
+    /// persistence layer's load_state. Replaces any existing log.
+    pub fn restore(&mut self, events: Vec<AuditEvent>, counter: u64) {
+        self.in_memory.clear();
+        for e in events {
+            if self.in_memory.len() >= self.capacity {
+                self.in_memory.pop_front();
+            }
+            self.in_memory.push_back(e);
+        }
+        self.counter = counter;
+    }
 }
 
 #[cfg(test)]
