@@ -32,6 +32,8 @@ regex = "1.11"
 # Lightweight blocking HTTP client for LLM-extractor backends. Pure
 # Rust, smaller than reqwest + tokio. ~200 KB binary impact vs ~5 MB.
 ureq = { version = "3", features = ["json"], default-features = false }
+# Cross-platform XDG/Home dirs lookup for default state location.
+dirs = "5"
 
 [dev-dependencies]
 # Property-based testing for HLB algebraic invariants.
@@ -44,6 +46,10 @@ tempfile = "3"
 [lib]
 name = "memory_plant"
 path = "src/lib.rs"
+
+[[bin]]
+name = "mp-mcp-server-rs"
+path = "src/bin/mp_mcp_server.rs"
 
 [profile.release]
 # Aggressive optimisation — Memory Plant hot paths are math-heavy.
