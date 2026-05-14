@@ -1,0 +1,43 @@
+[package]
+name = "memory-plant"
+version = "0.1.0"
+edition = "2021"
+authors = ["Abzal Tuganbay"]
+license = "Apache-2.0"
+description = "Compressed associative memory layer for AI agents. HLB algebraic compression + provable algebraic forget. Rust port of the Python reference implementation."
+repository = "https://github.com/sirenbyte/MemoryPlant"
+keywords = ["memory", "hrr", "hlb", "vsa", "ai-agent"]
+categories = ["algorithms", "data-structures"]
+rust-version = "1.75"
+
+[dependencies]
+# N-dim arrays (numpy equivalent). f32 throughout — same as Python default.
+ndarray = "0.16"
+# FFT for HRR operator (HLB is element-wise, no FFT needed).
+# rustfft is one of the fastest FFT libs in any language.
+rustfft = "6.4"
+# Random number generation for vocab / role tensors.
+rand = "0.9"
+rand_distr = "0.5"
+rand_chacha = "0.9"  # deterministic, seedable
+# (de)serialization for persistence.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Lightweight error type.
+thiserror = "2"
+
+[dev-dependencies]
+# Property-based testing for HLB algebraic invariants.
+proptest = "1"
+# Approximate float comparison.
+approx = "0.5"
+
+[lib]
+name = "memory_plant"
+path = "src/lib.rs"
+
+[profile.release]
+# Aggressive optimisation — Memory Plant hot paths are math-heavy.
+opt-level = 3
+lto = "fat"
+codegen-units = 1
