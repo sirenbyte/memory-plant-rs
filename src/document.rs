@@ -70,6 +70,65 @@ impl Encoder for MockEncoder {
     fn dim(&self) -> usize { self.dim }
 }
 
+// ============================================================
+// Production encoder via fastembed-rs (feature-gated)
+// ============================================================
+
+/// Pure-Rust sentence-transformer encoder. Downloads AllMiniLM-L6-v2
+/// (~30 MB, 384 dims) on first use into a cache directory.
+///
+/// Enabled by `--features fastembed`. Without it, only MockEncoder
+/// exists (suitable for tests but not production semantic search).
+///
+/// The wrapping layer adapts fastembed's batched-error API to the
+/// trait's "return empty vec on failure" contract.
+#[cfg(feature = "fastembed")]
+pub struct FastembedEncoder {
+    model: std::sync::Mutex<fastembed::TextEmbedding>,
+    dim: usize,
+}
+
+#[cfg(feature = "fastembed")]
+impl FastembedEncoder {
+    /// Initialise with the default AllMiniLM-L6-v2 model. 384-dim,
+    /// L2-normalized embeddings out of the box.
+    pub fn new() -> Result<Self, fastembed::Error> {
+        use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+        let model = TextEmbedding::try_new(
+            InitOptions::new(EmbeddingModel::AllMiniLML6V2)
+                .with_show_download_progress(false),
+        )?;
+        Ok(Self {
+            model: std::sync::Mutex::new(model),
+            dim: 384,
+        })
+    }
+
+    /// Use a specific fastembed model (different size / language).
+    pub fn with_model(
+        model_kind: fastembed::EmbeddingModel,
+        dim: usize,
+    ) -> Result<Self, fastembed::Error> {
+        use fastembed::{InitOptions, TextEmbedding};
+        let model = TextEmbedding::try_new(
+            InitOptions::new(model_kind).with_show_download_progress(false),
+        )?;
+        Ok(Self { model: std::sync::Mutex::new(model), dim })
+    }
+}
+
+#[cfg(feature = "fastembed")]
+impl Encoder for FastembedEncoder {
+    fn encode(&self, texts: &[String]) -> Vec<Vec<f32>> {
+        let texts_owned: Vec<String> = texts.iter().cloned().collect();
+        match self.model.lock() {
+            Ok(mut m) => m.embed(texts_owned, None).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
+    }
+    fn dim(&self) -> usize { self.dim }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentEntry {
     pub doc_id: String,

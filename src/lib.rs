@@ -65,4 +65,6 @@ pub use audit::{AuditTrail, AuditEvent, EventKind, classify_rejection};
 pub use anthropic::{AnthropicExtractor, ExtractorStats};
 pub use extractor::parse_facts_json;
 pub use document::{DocumentMemory, Encoder, MockEncoder, SearchHit, chunk_text};
+#[cfg(feature = "fastembed")]
+pub use document::FastembedEncoder;
 pub use service::MemoryService;

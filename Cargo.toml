@@ -10,6 +10,13 @@ keywords = ["memory", "hrr", "hlb", "vsa", "ai-agent"]
 categories = ["algorithms", "data-structures"]
 rust-version = "1.75"
 
+[features]
+default = []
+# Pure-Rust sentence-transformer embeddings via fastembed-rs.
+# Pulls in ONNX Runtime + downloads a ~30 MB model on first use.
+# Without this feature, only MockEncoder is available (tests only).
+fastembed = ["dep:fastembed"]
+
 [dependencies]
 # N-dim arrays (numpy equivalent). f32 throughout — same as Python default.
 ndarray = "0.16"
@@ -34,6 +41,9 @@ regex = "1.11"
 ureq = { version = "3", features = ["json"], default-features = false }
 # Cross-platform XDG/Home dirs lookup for default state location.
 dirs = "5"
+# Production sentence-transformer encoder (optional). Downloads
+# AllMiniLM-L6-v2 (~30 MB) on first use into a cache dir.
+fastembed = { version = "5", optional = true }
 
 [dev-dependencies]
 # Property-based testing for HLB algebraic invariants.
