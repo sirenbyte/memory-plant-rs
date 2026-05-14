@@ -1,0 +1,33 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "memory-plant-rs"
+version = "0.1.0"
+description = "Native-speed Python bindings for memory-plant. HLB algebraic compression, provable algebraic forget, 10-50x faster than the pure-Python reference."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Abzal Tuganbay" },
+]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: Apache Software License",
+]
+requires-python = ">=3.9"
+
+[project.urls]
+Repository = "https://github.com/sirenbyte/MemoryPlant"
+
+[tool.maturin]
+# Build artefact is loaded as `import memory_plant_rs`.
+module-name = "memory_plant_rs"
+features = ["pyo3/extension-module"]
+strip = true

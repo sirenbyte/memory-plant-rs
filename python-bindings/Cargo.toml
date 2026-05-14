@@ -1,0 +1,19 @@
+[package]
+name = "memory-plant-py"
+version = "0.1.0"
+edition = "2021"
+authors = ["Abzal Tuganbay"]
+license = "Apache-2.0"
+description = "Python bindings for memory-plant Rust port. 10-50x speedup over pure-Python hot paths."
+
+[lib]
+name = "memory_plant_rs"
+# cdylib lets Python load it; rlib lets Rust tests link it.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The Rust library we wrap.
+memory-plant = { path = ".." }
+# Python interop. abi3 = stable ABI — one wheel works across all
+# CPython 3.9+. Avoids rebuilding per-minor-version.
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py39"] }
