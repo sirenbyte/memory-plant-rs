@@ -42,6 +42,10 @@
 //! mathematical exposition.
 
 pub mod hlb;
+pub mod vocab;
+pub mod adaptive;
 
 // Re-export the most-used items at crate root.
-pub use hlb::{bind_hlb, unbind_hlb, normalize, cosine_similarity, random_hlb_role};
+pub use hlb::{bind_hlb, unbind_hlb, normalize, cosine_similarity, random_hlb_role, HlbError};
+pub use vocab::Vocab;
+pub use adaptive::{AdaptiveMemory, role_from_key, safe_shard_capacity};

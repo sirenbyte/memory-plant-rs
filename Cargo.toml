@@ -25,6 +25,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Lightweight error type.
 thiserror = "2"
+# Deterministic key→role hashing across platforms / Python parity.
+sha2 = "0.10"
 
 [dev-dependencies]
 # Property-based testing for HLB algebraic invariants.

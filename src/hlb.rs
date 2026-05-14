@@ -34,6 +34,10 @@ pub enum HlbError {
     DimMismatch { lhs: usize, rhs: usize },
     #[error("zero-norm vector: cannot normalize")]
     ZeroNorm,
+    #[error("vocab full: cap={cap}, attempted to register {attempted:?}")]
+    VocabFull { cap: usize, attempted: String },
+    #[error("key not found in any shard: {key:?}")]
+    KeyNotFound { key: String },
 }
 
 /// L2-normalize a vector in place. Returns `ZeroNorm` if the input
