@@ -46,6 +46,8 @@ dirs = "5"
 fastembed = { version = "5", optional = true }
 # Complex numbers for FHRR / qFHRR superposition in benchmarks.
 num-complex = "0.4"
+# gzip compression for chunk text storage. Pure-Rust, no system libs.
+flate2 = "1"
 
 [dev-dependencies]
 # Property-based testing for HLB algebraic invariants.

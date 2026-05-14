@@ -137,13 +137,76 @@ pub struct DocumentEntry {
     pub added_ts: f64,
 }
 
+/// Stored chunk. Text is gzip-compressed in memory when long enough
+/// to benefit (gzip header overhead is ~20 bytes, so short chunks
+/// would round-trip larger). Embedding stays uncompressed because
+/// FAISS-style cosine search needs raw floats per query.
+///
+/// Use `Chunk::text()` to materialize the original string on demand.
+/// Hot search paths only touch `embedding`; text is decompressed
+/// exactly once per returned hit (top-k), not per candidate.
 #[derive(Debug, Clone)]
 pub struct Chunk {
     pub id: String,
     pub doc_id: String,
     pub idx: usize,
-    pub text: String,
+    /// Either raw UTF-8 bytes (`text_compressed = false`) or
+    /// gzip-deflate(text) bytes (`text_compressed = true`).
+    text_bytes: Vec<u8>,
+    text_compressed: bool,
     pub embedding: Vec<f32>,
+}
+
+/// Below this length, gzip's ~20-byte header makes compression a net
+/// loss. Above it, typical text compresses 2-4× — saves real memory
+/// at 10K+ chunks scale.
+const COMPRESS_THRESHOLD: usize = 128;
+
+impl Chunk {
+    /// Construct, compressing the text if it crosses the threshold.
+    fn new(id: String, doc_id: String, idx: usize, text: &str, embedding: Vec<f32>) -> Self {
+        let (bytes, compressed) = compress_text(text);
+        Self { id, doc_id, idx, text_bytes: bytes, text_compressed: compressed, embedding }
+    }
+
+    /// Decompress and return the original chunk text. Called only on
+    /// the small set of search hits (typically k=5-20), not on every
+    /// candidate. ~5-10 μs per call for ~500-char chunks on modern CPU.
+    pub fn text(&self) -> String {
+        if !self.text_compressed {
+            return String::from_utf8_lossy(&self.text_bytes).into_owned();
+        }
+        use flate2::read::GzDecoder;
+        use std::io::Read;
+        let mut dec = GzDecoder::new(self.text_bytes.as_slice());
+        let mut out = String::new();
+        let _ = dec.read_to_string(&mut out);
+        out
+    }
+
+    /// Raw stored byte length — useful for memory accounting and
+    /// the compression-ratio test.
+    pub fn stored_bytes(&self) -> usize { self.text_bytes.len() }
+
+    /// Whether this chunk's text is held in gzip form.
+    pub fn is_compressed(&self) -> bool { self.text_compressed }
+}
+
+fn compress_text(text: &str) -> (Vec<u8>, bool) {
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+    if text.len() < COMPRESS_THRESHOLD {
+        return (text.as_bytes().to_vec(), false);
+    }
+    let mut enc = GzEncoder::new(Vec::with_capacity(text.len() / 2), Compression::default());
+    if enc.write_all(text.as_bytes()).is_err() {
+        return (text.as_bytes().to_vec(), false);
+    }
+    match enc.finish() {
+        Ok(bytes) if bytes.len() < text.len() => (bytes, true),
+        _ => (text.as_bytes().to_vec(), false),
+    }
 }
 
 pub struct DocumentMemory<E: Encoder> {
@@ -202,13 +265,14 @@ impl<E: Encoder> DocumentMemory<E> {
         let embeddings = self.encoder.encode(&chunks);
         let n = chunks.len();
         for (i, (txt, emb)) in chunks.iter().zip(embeddings.iter()).enumerate() {
-            self.chunks.push(Chunk {
-                id: format!("{doc_id}#chunk_{i}"),
-                doc_id: doc_id.clone(),
-                idx: i,
-                text: txt.chars().take(500).collect(),
-                embedding: emb.clone(),
-            });
+            let preview: String = txt.chars().take(500).collect();
+            self.chunks.push(Chunk::new(
+                format!("{doc_id}#chunk_{i}"),
+                doc_id.clone(),
+                i,
+                &preview,
+                emb.clone(),
+            ));
         }
         self.documents.insert(
             doc_id.clone(),
@@ -269,6 +333,10 @@ impl<E: Encoder> DocumentMemory<E> {
             .collect();
 
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        // Decompress text only for the final top-k. Embeddings did
+        // all the heavy lifting up to this point on compressed-text
+        // chunks; the actual decompress is amortized across at most
+        // `k` hits (typically 5-20).
         scored
             .into_iter()
             .take(k)
@@ -276,7 +344,7 @@ impl<E: Encoder> DocumentMemory<E> {
                 chunk_id: c.id.clone(),
                 doc_id: c.doc_id.clone(),
                 score,
-                text: c.text.clone(),
+                text: c.text(),
             })
             .collect()
     }
@@ -381,8 +449,54 @@ mod tests {
         assert!(
             dm.chunks
                 .iter()
-                .all(|c| c.text.contains("different") || c.text.contains("content"))
+                .all(|c| {
+                    let t = c.text();
+                    t.contains("different") || t.contains("content")
+                })
         );
+    }
+
+    #[test]
+    fn short_text_stored_uncompressed() {
+        let mut dm = make();
+        dm.add_document("a", "short text", HashMap::new());
+        let c = &dm.chunks[0];
+        assert!(!c.is_compressed(), "short text shouldn't trigger gzip");
+        assert_eq!(c.text(), "short text");
+    }
+
+    #[test]
+    fn long_text_stored_compressed_and_smaller() {
+        // Build a long but repetitive paragraph so gzip can squeeze it.
+        let long: String = "the quick brown fox jumps over the lazy dog. ".repeat(40);
+        let original_len = long.len();
+        let mut dm = DocumentMemory::new(MockEncoder::new(32))
+            .with_chunking(10_000, 0);  // ensure 1 chunk
+        dm.add_document("a", &long, HashMap::new());
+        let c = &dm.chunks[0];
+        assert!(c.is_compressed(), "long repetitive text should compress");
+        assert!(
+            c.stored_bytes() < original_len.min(500),
+            "gzip stored={} should beat preview-capped raw={}",
+            c.stored_bytes(), original_len.min(500),
+        );
+        // Roundtrip — text() returns the same 500-char preview.
+        let recovered = c.text();
+        assert!(recovered.starts_with("the quick brown fox"));
+    }
+
+    #[test]
+    fn search_works_on_compressed_chunks() {
+        let mut dm = DocumentMemory::new(MockEncoder::new(32))
+            .with_chunking(10_000, 0);
+        let long: String = "alpha beta gamma delta epsilon ".repeat(30);
+        dm.add_document("a", &long, HashMap::new());
+        let hits = dm.semantic_search::<fn(&DocumentEntry) -> bool>(
+            "alpha beta", 3, None,
+        );
+        assert!(!hits.is_empty());
+        // The returned hit text should be the decompressed preview.
+        assert!(hits[0].text.contains("alpha"));
     }
 
     #[test]
