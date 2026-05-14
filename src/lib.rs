@@ -49,6 +49,7 @@ pub mod extractor;
 pub mod personal;
 pub mod audit;
 pub mod persistence;
+pub mod anthropic;
 
 // Re-export the most-used items at crate root.
 pub use hlb::{bind_hlb, unbind_hlb, normalize, cosine_similarity, random_hlb_role, HlbError};
@@ -58,3 +59,5 @@ pub use fact::Fact;
 pub use extractor::{Extractor, RegexExtractor};
 pub use personal::PersonalMemory;
 pub use audit::{AuditTrail, AuditEvent, EventKind, classify_rejection};
+pub use anthropic::{AnthropicExtractor, ExtractorStats};
+pub use extractor::parse_facts_json;

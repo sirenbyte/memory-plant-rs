@@ -29,6 +29,9 @@ thiserror = "2"
 sha2 = "0.10"
 # Regex extractor (default offline fact extraction).
 regex = "1.11"
+# Lightweight blocking HTTP client for LLM-extractor backends. Pure
+# Rust, smaller than reqwest + tokio. ~200 KB binary impact vs ~5 MB.
+ureq = { version = "3", features = ["json"], default-features = false }
 
 [dev-dependencies]
 # Property-based testing for HLB algebraic invariants.
