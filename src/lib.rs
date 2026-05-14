@@ -50,6 +50,7 @@ pub mod personal;
 pub mod audit;
 pub mod persistence;
 pub mod anthropic;
+pub mod openai;
 pub mod document;
 pub mod service;
 pub mod mcp_server;
@@ -63,6 +64,7 @@ pub use extractor::{Extractor, RegexExtractor};
 pub use personal::PersonalMemory;
 pub use audit::{AuditTrail, AuditEvent, EventKind, classify_rejection};
 pub use anthropic::{AnthropicExtractor, ExtractorStats};
+pub use openai::OpenAIExtractor;
 pub use extractor::parse_facts_json;
 pub use document::{DocumentMemory, Encoder, MockEncoder, SearchHit, chunk_text};
 #[cfg(feature = "fastembed")]
