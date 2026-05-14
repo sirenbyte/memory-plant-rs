@@ -44,6 +44,8 @@ dirs = "5"
 # Production sentence-transformer encoder (optional). Downloads
 # AllMiniLM-L6-v2 (~30 MB) on first use into a cache dir.
 fastembed = { version = "5", optional = true }
+# Complex numbers for FHRR / qFHRR superposition in benchmarks.
+num-complex = "0.4"
 
 [dev-dependencies]
 # Property-based testing for HLB algebraic invariants.
