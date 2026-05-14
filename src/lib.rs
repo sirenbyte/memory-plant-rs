@@ -42,6 +42,7 @@
 //! mathematical exposition.
 
 pub mod hlb;
+pub mod vsa;
 pub mod vocab;
 pub mod adaptive;
 pub mod fact;
@@ -57,6 +58,7 @@ pub mod mcp_server;
 
 // Re-export the most-used items at crate root.
 pub use hlb::{bind_hlb, unbind_hlb, normalize, cosine_similarity, random_hlb_role, HlbError};
+pub use vsa::{Phase, VsaError};
 pub use vocab::Vocab;
 pub use adaptive::{AdaptiveMemory, role_from_key, safe_shard_capacity};
 pub use fact::Fact;
