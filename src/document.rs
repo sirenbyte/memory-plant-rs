@@ -1024,6 +1024,46 @@ mod tests {
     }
 
     #[test]
+    fn retrieval_bench_floor_e5_mlx() {
+        // Regression guard for the retrieval micro-bench (see BENCH.md): 28
+        // labeled multilingual queries over a 33-passage corpus, real e5(MLX)
+        // vectors. Asserts the recorded quality doesn't regress. NOT LongMemEval
+        // — this is retrieval-only (the layer MP owns).
+        let raw = include_str!("testdata/bench_retrieval.json");
+        let v: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let dim = v["dim"].as_u64().unwrap() as usize;
+        let to_vec = |val: &serde_json::Value| -> Vec<f32> {
+            val.as_array().unwrap().iter().map(|x| x.as_f64().unwrap() as f32).collect()
+        };
+        let mut dm = DocumentMemory::new(MockEncoder::new(dim));
+        for d in v["corpus"].as_array().unwrap() {
+            dm.add_document_with_embeddings(
+                d["id"].as_str().unwrap().to_string(),
+                vec![d["text"].as_str().unwrap().to_string()],
+                vec![to_vec(&d["emb"])],
+                HashMap::new(),
+            );
+        }
+        let (mut r3_hits, mut mrr, mut n) = (0usize, 0.0f64, 0usize);
+        for q in v["queries"].as_array().unwrap() {
+            let relevant: Vec<&str> =
+                q["relevant"].as_array().unwrap().iter().map(|x| x.as_str().unwrap()).collect();
+            let ranked = dm.search(&to_vec(&q["emb"]), 10, &SearchFilter::default());
+            let rank = ranked.iter().position(|h| relevant.contains(&h.doc_id.as_str())).map(|i| i + 1);
+            n += 1;
+            if let Some(r) = rank {
+                if r <= 3 { r3_hits += 1; }
+                mrr += 1.0 / r as f64;
+            }
+        }
+        let recall_at_3 = r3_hits as f64 / n as f64;
+        let mrr = mrr / n as f64;
+        // Recorded: R@3=1.000, MRR=0.982. Guard with headroom.
+        assert!(recall_at_3 >= 0.95, "retrieval R@3 regressed: {recall_at_3:.3}");
+        assert!(mrr >= 0.95, "retrieval MRR regressed: {mrr:.3}");
+    }
+
+    #[test]
     fn ann_fast_path_matches_exact_no_filter() {
         use crate::index::BruteForceIndex;
         let mut exact = make();
