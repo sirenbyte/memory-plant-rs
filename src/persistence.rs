@@ -30,6 +30,7 @@ use crate::audit::{AuditEvent, AuditTrail};
 use crate::extractor::Extractor;
 use crate::hlb::HlbError;
 use crate::personal::PersonalMemory;
+use redb::{ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -70,6 +71,8 @@ struct AdaptiveSnapshot {
 
 const SCHEMA_VERSION: u32 = 1;
 const ADAPTIVE_SEED_DEFAULT: u64 = 42;
+/// redb table for the embedded-KV backend (single-blob snapshot + enc flag).
+const REDB_STATE: TableDefinition<&str, &[u8]> = TableDefinition::new("mp_state");
 
 impl AdaptiveMemory {
     /// Build the on-disk snapshot (shared by plaintext + sealed save).
@@ -160,6 +163,76 @@ impl AdaptiveMemory {
         let json = crate::crypto::open(&sealed, key)
             .map_err(|e| PersistError::Corrupt(e.to_string()))?;
         let snap: AdaptiveSnapshot = serde_json::from_slice(&json)?;
+        Self::from_snapshot(snap)
+    }
+
+    /// Save to a redb embedded KV store (`memory.redb`) — ACID, pure-Rust,
+    /// wasm-friendly. Pass `key` to encrypt the snapshot at rest (AEAD).
+    pub fn save_state_redb(
+        &self,
+        path: impl AsRef<Path>,
+        key: Option<&[u8; 32]>,
+    ) -> Result<(), PersistError> {
+        let path = path.as_ref();
+        fs::create_dir_all(path)?;
+        let mut bytes = serde_json::to_vec(&self.build_snapshot())?;
+        let encrypted = key.is_some();
+        if let Some(k) = key {
+            bytes = crate::crypto::seal(&bytes, k);
+        }
+        let db = redb::Database::create(path.join("memory.redb"))
+            .map_err(|e| PersistError::Corrupt(format!("redb create: {e}")))?;
+        let w = db
+            .begin_write()
+            .map_err(|e| PersistError::Corrupt(format!("redb write txn: {e}")))?;
+        {
+            let mut t = w
+                .open_table(REDB_STATE)
+                .map_err(|e| PersistError::Corrupt(format!("redb table: {e}")))?;
+            t.insert("enc", [encrypted as u8].as_slice())
+                .map_err(|e| PersistError::Corrupt(format!("redb insert: {e}")))?;
+            t.insert("adaptive", bytes.as_slice())
+                .map_err(|e| PersistError::Corrupt(format!("redb insert: {e}")))?;
+        }
+        w.commit()
+            .map_err(|e| PersistError::Corrupt(format!("redb commit: {e}")))?;
+        Ok(())
+    }
+
+    /// Load from a redb store written by save_state_redb. Provide `key` iff
+    /// the store was sealed (an "encrypted; key required" error otherwise).
+    pub fn load_state_redb(
+        path: impl AsRef<Path>,
+        key: Option<&[u8; 32]>,
+    ) -> Result<Self, PersistError> {
+        let path = path.as_ref();
+        let db = redb::Database::open(path.join("memory.redb"))
+            .map_err(|e| PersistError::Corrupt(format!("redb open: {e}")))?;
+        let r = db
+            .begin_read()
+            .map_err(|e| PersistError::Corrupt(format!("redb read txn: {e}")))?;
+        let t = r
+            .open_table(REDB_STATE)
+            .map_err(|e| PersistError::Corrupt(format!("redb table: {e}")))?;
+        let encrypted = t
+            .get("enc")
+            .map_err(|e| PersistError::Corrupt(format!("redb get: {e}")))?
+            .map(|v| v.value().first().copied() == Some(1u8))
+            .unwrap_or(false);
+        let mut bytes = t
+            .get("adaptive")
+            .map_err(|e| PersistError::Corrupt(format!("redb get: {e}")))?
+            .ok_or_else(|| PersistError::Corrupt("redb: missing 'adaptive'".into()))?
+            .value()
+            .to_vec();
+        if encrypted {
+            let k = key.ok_or_else(|| {
+                PersistError::Corrupt("redb store is encrypted; key required".into())
+            })?;
+            bytes = crate::crypto::open(&bytes, k)
+                .map_err(|e| PersistError::Corrupt(e.to_string()))?;
+        }
+        let snap: AdaptiveSnapshot = serde_json::from_slice(&bytes)?;
         Self::from_snapshot(snap)
     }
 }
@@ -401,5 +474,33 @@ mod tests {
 
         // wrong key fails (tamper/auth)
         assert!(AdaptiveMemory::load_state_sealed(dir.path(), &[0u8; 32]).is_err());
+    }
+
+    #[test]
+    fn redb_save_load_roundtrip_plain_and_encrypted() {
+        let am = store_fixture();
+        let canon = |a: &AdaptiveMemory| {
+            let d = TempDir::new().unwrap();
+            a.save_state(d.path()).unwrap();
+            fs::read_to_string(d.path().join("adaptive.json")).unwrap()
+        };
+        let base = canon(&am);
+
+        // plaintext redb round-trip
+        let d1 = TempDir::new().unwrap();
+        am.save_state_redb(d1.path(), None).unwrap();
+        assert!(d1.path().join("memory.redb").exists());
+        let am1 = AdaptiveMemory::load_state_redb(d1.path(), None).unwrap();
+        assert_eq!(canon(&am1), base);
+
+        // encrypted redb round-trip
+        let key = [55u8; 32];
+        let d2 = TempDir::new().unwrap();
+        am.save_state_redb(d2.path(), Some(&key)).unwrap();
+        let am2 = AdaptiveMemory::load_state_redb(d2.path(), Some(&key)).unwrap();
+        assert_eq!(canon(&am2), base);
+        // encrypted store: needs the right key
+        assert!(AdaptiveMemory::load_state_redb(d2.path(), None).is_err());
+        assert!(AdaptiveMemory::load_state_redb(d2.path(), Some(&[0u8; 32])).is_err());
     }
 }
