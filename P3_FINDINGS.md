@@ -55,7 +55,18 @@ Decision: **Rust-only** product (no Python in product; mass-market users start e
 - `FastembedEncoder::multilingual()` (MultilingualE5Small, 384-dim) + `embed_query`/`embed_passage` (e5 prefixes) added to `src/document.rs`, behind existing `--features fastembed`.
 - Built clean (`--features fastembed`, fastembed 5.15 + ort 2.0, 45s; ORT downloaded prebuilt on macOS host — desktop build is painless, only MOBILE ORT is hard).
 - Test `document::e5_tests::multilingual_ru_kz_ranks_correctly` PASSES (ru + en correct; kz bonus). Default build (93 tests) untouched.
-- ⇒ on-device ru/en embeddings work in the native Rust engine. Next: wire `embed_query` into `semantic_search` (query prefix), then redb + at-rest encryption.
+- ⇒ on-device ru/en embeddings work in the native Rust engine.
+
+### ✅ DELIVERED (branch `feat/mp-multilingual-upgrade`, all tests green, committed)
+1. `7d793e1` e5 query-prefix wired into `semantic_search` (query/passage prefixes).
+2. `4fd996c` at-rest encryption — `crypto.rs` (ChaCha20-Poly1305 AEAD) + `save/load_state_sealed`. Closes the plaintext-on-disk gap.
+3. `77e02de` redb embedded-KV backend (`save/load_state_redb`, optional AEAD).
+4. `8dfbb1e` `index.rs` — `VectorIndex` trait + `BruteForceIndex` + optional `HnswIndex` (`--features ann`, instant-distance).
+5. `067bb92` opt-in ANN fast-path in `DocumentMemory` (no-filter only; default + filtered stay exact; index derived from chunks).
+Tests: 103 default / 104 `--features ann` / +2 `--features fastembed` (e5), 0 failed.
+
+### ⏳ REMAINING in P3 = UniFFI iOS/Android packaging (multi-week)
+Needs iOS/Android toolchains + mobile ORT build + on-device testing — not a single-file change. Spec in §P3.3 above. This is the long pole; the rest of the Rust engine is feature-complete + tested on the host.
 
 ## Prioritized order (Rust-only, ru/en priority)
 1. **🔴 HLB parity fix** (persist Python roles/vocab → load in Rust + division-unbind) + maturin PyO3 parity test. *Blocks provable-forget + P4.*
