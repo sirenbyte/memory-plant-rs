@@ -74,6 +74,17 @@ Engine is now callable from Swift/Kotlin. See [`bindings/README.md`](bindings/RE
 - **Durable persistence** (`load_or_create` ctor) + **encrypted-at-rest** (`save_sealed`/`load_or_create_sealed`, 32-byte ChaCha20-Poly1305 key). Sealed seals the WHOLE footprint (values+keys+schema+service meta; audit not persisted) — new `MemoryService`/`PersonalMemory` `save_state_sealed`/`load_state_sealed` over the existing `AdaptiveMemory` AEAD. Tests `ffi_persistence_survives_restart` + `ffi_sealed_persistence_roundtrip`.
 - **Document RAG now in FFI** (store big files + semantic search): `chunkText` (pure-Rust split, free), `addDocument(docId, chunks, embeddings, metadata)`, `search(queryEmbedding, k, metadata, containsText, minScore, docIds) -> [DocHit]`, `forgetDocument`, `nDocuments`. **Caller supplies embeddings** (app's model / device LLM) → FFI stays ORT-free. Documents persist + encrypt alongside facts (`documents.json[.enc]`). Engine upgrade: new `SearchFilter` (metadata eq / contains_text / min_score / doc_ids) + encoder-free `add_document_with_embeddings`/`search` + DocumentMemory `save/load_state[_sealed]`. Internal e5 encoder still available behind `--features fastembed`. Tests: engine `injection_add_and_search_with_filters`, `document_persistence_roundtrip`, `document_sealed_roundtrip_and_no_plaintext`; FFI `ffi_document_rag_search_and_filters`, `ffi_documents_persist_sealed_across_restart`. Full suite 111 passed / 0 failed.
 
+### ✅ A′ — embeddings via the LLM runtime (no separate ORT), validated end-to-end
+Model = `intfloat/multilingual-e5-small` (384-d, ru/en). Ran it through **MLX**
+(`mlx-embeddings`, the Qwen runtime family — NOT ORT) and proved the full chain
+e5(MLX) → Memory Plant `add_document_with_embeddings` → `search` ranks the ru
+doc first (0.886 vs en 0.656). Real vectors baked into `src/testdata/e5_mlx_vectors.json`
++ permanent test `e5_mlx_vectors_rank_correctly_in_memory_plant` (no Python/MLX/net
+to re-run). Reference embedder: `bindings/embed_e5_mlx.py`. Device recipe (prefixes
+query:/passage:, L2-norm, dim 384, llama.cpp embedding mode for Android) in
+`bindings/README.md`. ⇒ the "embedding source on device" gap is de-risked: reuse
+the chat runtime, no ORT long-pole. (Producing vectors on real hardware still TODO.)
+
 ### ⏳ REMAINING in P3 (smaller than thought)
 - **Android `.so`**: NDK not installed on host → `rustup target add` android ABIs + `cargo-ndk build` (recipe in bindings/README.md). No code change — same `ffi.rs`.
 - **On-device runtime test**: needs an Xcode/Android-Studio harness project (drag in xcframework / jniLibs, smoke-call store/recall).

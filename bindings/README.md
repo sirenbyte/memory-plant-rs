@@ -69,6 +69,37 @@ encoder (`FastembedEncoder::multilingual`) exists in the engine behind
 default FFI. Other heavy/optional surfaces (ANN index, LLM fact-extractors) are
 also out of the FFI; the default fact extractor is the offline `RegexExtractor`.
 
+### Where embeddings come from (recommended: reuse the LLM runtime, no ORT)
+
+The chosen embedder is **`intfloat/multilingual-e5-small`** — 384-dim, ru/en
+(kz bonus), ~120 MB. The point: run it through the **same runtime that already
+runs your chat model** instead of pulling in a separate ONNX Runtime build:
+
+- **iOS/macOS:** MLX (`mlx-embeddings`) — same family as MLX-served Qwen.
+- **Android / cross-platform:** `llama.cpp` embedding mode (`llama-embedding`
+  / `llama_embd`) — it runs e5/bge GGUF models, so no extra runtime to build.
+
+Rules to match what `search` expects (validated by the
+`e5_mlx_vectors_rank_correctly_in_memory_plant` test against real MLX vectors):
+
+1. Prefix text: **`"query: "`** for searches, **`"passage: "`** for stored chunks.
+2. Mean-pool + **L2-normalize** the output (cosine == dot product downstream).
+3. dim = **384**; use the *same* model+prefixing for store and query forever
+   (switching models ⇒ reindex).
+
+Host reference embedder (MLX): [`embed_e5_mlx.py`](embed_e5_mlx.py). Measured
+on real vectors — ru query "Кто написал роман Война и мир?" ranks the ru
+passage at **0.886**, clearly above the en distractor (0.656).
+
+```
+file text → chunkText → [e5 via llama.cpp/MLX, "passage: "] → addDocument(embeddings)
+query     →             [e5 via llama.cpp/MLX, "query: "  ] → search(queryEmbedding, …)
+```
+
+The same on-device LLM (Qwen) can alternatively produce the vectors (an
+*embedding LoRA* on the base) — heavier per chunk but zero extra model. e5 via
+the shared runtime is the lighter, higher-quality-per-MB default.
+
 ## Status (2026-06-04)
 
 | Target | Status |

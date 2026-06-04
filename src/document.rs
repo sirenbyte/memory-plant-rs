@@ -988,6 +988,42 @@ mod tests {
     }
 
     #[test]
+    fn e5_mlx_vectors_rank_correctly_in_memory_plant() {
+        // A′ proof: REAL multilingual-e5-small vectors produced via MLX (the
+        // Qwen on-device runtime family — NOT ONNX Runtime; see
+        // bindings/embed_e5_mlx.py). End-to-end: e5(MLX) → Memory Plant
+        // add/search → the ru query ranks the ru document first. Baked into a
+        // committed fixture so the suite re-runs with no Python/MLX/network.
+        let raw = include_str!("testdata/e5_mlx_vectors.json");
+        let v: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let dim = v["dim"].as_u64().unwrap() as usize;
+        let to_vec = |val: &serde_json::Value| -> Vec<f32> {
+            val.as_array().unwrap().iter().map(|x| x.as_f64().unwrap() as f32).collect()
+        };
+
+        let mut dm = DocumentMemory::new(MockEncoder::new(dim));
+        for doc in v["docs"].as_array().unwrap() {
+            dm.add_document_with_embeddings(
+                doc["id"].as_str().unwrap().to_string(),
+                vec![doc["text"].as_str().unwrap().to_string()],
+                vec![to_vec(&doc["emb"])],
+                HashMap::new(),
+            );
+        }
+        assert_eq!(dm.n_documents(), 4);
+
+        let q = to_vec(&v["query"]["emb"]);
+        let expected = v["query"]["expected_top"].as_str().unwrap();
+        let hits = dm.search(&q, 4, &SearchFilter::default());
+        assert!(!hits.is_empty());
+        assert_eq!(hits[0].doc_id, expected, "e5(MLX) ru query must rank the ru doc first");
+        assert!(hits[0].score > 0.8, "expected a strong ru match, got {}", hits[0].score);
+        // ru beats the en distractor by a clear margin.
+        let en = hits.iter().find(|h| h.doc_id == "en_cell").unwrap();
+        assert!(hits[0].score - en.score > 0.15, "ru should clearly beat en");
+    }
+
+    #[test]
     fn ann_fast_path_matches_exact_no_filter() {
         use crate::index::BruteForceIndex;
         let mut exact = make();
