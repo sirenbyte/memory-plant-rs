@@ -34,6 +34,9 @@ serde_json = "1"
 thiserror = "2"
 # Deterministic key→role hashing across platforms / Python parity.
 sha2 = "0.10"
+# At-rest encryption of persisted state (ChaCha20-Poly1305 AEAD). Pure-Rust,
+# wasm-clean. Distinct from rand_chacha (the deterministic role/vocab RNG).
+chacha20poly1305 = "0.10"
 # Regex extractor (default offline fact extraction).
 regex = "1.11"
 # Lightweight blocking HTTP client for LLM-extractor backends. Pure

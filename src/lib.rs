@@ -50,6 +50,7 @@ pub mod extractor;
 pub mod personal;
 pub mod audit;
 pub mod persistence;
+pub mod crypto;
 pub mod anthropic;
 pub mod openai;
 pub mod document;

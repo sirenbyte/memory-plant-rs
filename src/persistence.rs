@@ -72,17 +72,12 @@ const SCHEMA_VERSION: u32 = 1;
 const ADAPTIVE_SEED_DEFAULT: u64 = 42;
 
 impl AdaptiveMemory {
-    /// Serialize to a directory. Creates the path if missing.
-    /// Writes `adaptive.json` only — no binary blobs.
-    pub fn save_state(&self, path: impl AsRef<Path>) -> Result<(), PersistError> {
-        let path = path.as_ref();
-        fs::create_dir_all(path)?;
-
+    /// Build the on-disk snapshot (shared by plaintext + sealed save).
+    fn build_snapshot(&self) -> AdaptiveSnapshot {
         let shards: Vec<Vec<(String, usize)>> = (0..self.n_shards())
             .map(|i| self._shard_pairs_impl(i))
             .collect();
-
-        let snap = AdaptiveSnapshot {
+        AdaptiveSnapshot {
             schema_version: SCHEMA_VERSION,
             dim: self.dim(),
             shard_capacity: self.shard_capacity(),
@@ -92,18 +87,12 @@ impl AdaptiveMemory {
                 .filter_map(|i| self.vocab.key_at(i).map(String::from))
                 .collect(),
             shards,
-        };
-        let json = serde_json::to_string_pretty(&snap)?;
-        fs::write(path.join("adaptive.json"), json)?;
-        Ok(())
+        }
     }
 
-    /// Restore from a directory written by save_state. Recomputes
-    /// every tensor from scratch — vocab from seed, M from store-replay.
-    pub fn load_state(path: impl AsRef<Path>) -> Result<Self, PersistError> {
-        let path = path.as_ref();
-        let raw = fs::read_to_string(path.join("adaptive.json"))?;
-        let snap: AdaptiveSnapshot = serde_json::from_str(&raw)?;
+    /// Reconstruct from a snapshot (shared by plaintext + sealed load).
+    /// Recomputes every tensor from scratch — vocab from seed, M from replay.
+    fn from_snapshot(snap: AdaptiveSnapshot) -> Result<Self, PersistError> {
         if snap.schema_version != SCHEMA_VERSION {
             return Err(PersistError::Corrupt(format!(
                 "schema {} != current {}",
@@ -116,15 +105,10 @@ impl AdaptiveMemory {
             Some(snap.shard_capacity),
             snap.vocab_seed,
         )?;
-        // Replay every fact in original order. Vocab registers
-        // lazily on first use of each value, so the schema iteration
-        // here is just the natural store order.
+        // Replay every fact in original (per-shard) order; vocab re-registers
+        // lazily in the same order, preserving indices.
         for shard in &snap.shards {
             for (key, vocab_idx) in shard {
-                // Look up the original value string from the saved
-                // vocab_keys list. This re-registers it in the new
-                // AM's vocab (with same index since we re-register
-                // in order).
                 let value = snap.vocab_keys.get(*vocab_idx).ok_or_else(|| {
                     PersistError::Corrupt(format!("vocab_idx {} out of range", vocab_idx))
                 })?;
@@ -134,6 +118,50 @@ impl AdaptiveMemory {
         Ok(am)
     }
 
+    /// Serialize to a directory (plaintext `adaptive.json`, no binary blobs).
+    pub fn save_state(&self, path: impl AsRef<Path>) -> Result<(), PersistError> {
+        let path = path.as_ref();
+        fs::create_dir_all(path)?;
+        let json = serde_json::to_string_pretty(&self.build_snapshot())?;
+        fs::write(path.join("adaptive.json"), json)?;
+        Ok(())
+    }
+
+    /// Restore from a plaintext directory written by save_state.
+    pub fn load_state(path: impl AsRef<Path>) -> Result<Self, PersistError> {
+        let path = path.as_ref();
+        let raw = fs::read_to_string(path.join("adaptive.json"))?;
+        let snap: AdaptiveSnapshot = serde_json::from_str(&raw)?;
+        Self::from_snapshot(snap)
+    }
+
+    /// Encrypted-at-rest save: ChaCha20-Poly1305 over the snapshot bytes,
+    /// written to `adaptive.json.enc`. (P3: real AEAD, not the ChaCha8 RNG.)
+    pub fn save_state_sealed(
+        &self,
+        path: impl AsRef<Path>,
+        key: &[u8; 32],
+    ) -> Result<(), PersistError> {
+        let path = path.as_ref();
+        fs::create_dir_all(path)?;
+        let json = serde_json::to_vec(&self.build_snapshot())?;
+        let sealed = crate::crypto::seal(&json, key);
+        fs::write(path.join("adaptive.json.enc"), sealed)?;
+        Ok(())
+    }
+
+    /// Restore from a directory written by save_state_sealed.
+    pub fn load_state_sealed(
+        path: impl AsRef<Path>,
+        key: &[u8; 32],
+    ) -> Result<Self, PersistError> {
+        let path = path.as_ref();
+        let sealed = fs::read(path.join("adaptive.json.enc"))?;
+        let json = crate::crypto::open(&sealed, key)
+            .map_err(|e| PersistError::Corrupt(e.to_string()))?;
+        let snap: AdaptiveSnapshot = serde_json::from_slice(&json)?;
+        Self::from_snapshot(snap)
+    }
 }
 
 // ============================================================
@@ -344,5 +372,34 @@ mod tests {
             .map(|e| e.file_name().into_string().unwrap())
             .collect();
         assert_eq!(files, vec!["adaptive.json"]);
+    }
+
+    #[test]
+    fn sealed_save_load_roundtrip_and_not_plaintext() {
+        let am = store_fixture();
+        let key = [42u8; 32];
+        let dir = TempDir::new().unwrap();
+        am.save_state_sealed(dir.path(), &key).unwrap();
+
+        // on disk it's encrypted — no plaintext schema marker leaks
+        let enc = fs::read(dir.path().join("adaptive.json.enc")).unwrap();
+        assert!(
+            !enc.windows(14).any(|w| w == b"schema_version"),
+            "plaintext leaked into the sealed blob"
+        );
+
+        // faithful round-trip: am2 produces the SAME plaintext snapshot as am
+        let am2 = AdaptiveMemory::load_state_sealed(dir.path(), &key).unwrap();
+        let da = TempDir::new().unwrap();
+        let db = TempDir::new().unwrap();
+        am.save_state(da.path()).unwrap();
+        am2.save_state(db.path()).unwrap();
+        assert_eq!(
+            fs::read_to_string(da.path().join("adaptive.json")).unwrap(),
+            fs::read_to_string(db.path().join("adaptive.json")).unwrap(),
+        );
+
+        // wrong key fails (tamper/auth)
+        assert!(AdaptiveMemory::load_state_sealed(dir.path(), &[0u8; 32]).is_err());
     }
 }
