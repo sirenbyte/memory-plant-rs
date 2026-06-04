@@ -26,25 +26,24 @@ and WASM.
 
 113 tests green (`cargo test`).
 
-## Legacy roadmap (historical)
+## Original roadmap — status
 
-**Phase 0 — HLB core**: ✅ done. `bind`, `unbind`, `normalize`,
-`cosine_similarity`, `random_hlb_role`, plus a superposition + AMP
-recall test that passes at N=10 in dim=1024.
-
-Roadmap:
+The initial port roadmap is **essentially complete**. Capacity scaling uses
+**sharding** (add a shard when one fills; the HLB dimension stays fixed) rather
+than the Python reference's *auto-upgrade-dim* — a fixed dimension is preferable
+on-device (predictable memory, no full re-embed on growth).
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | HLB primitives + tests | ✅ |
-| 1 | `AdaptiveMemory` shards + capacity rules | next |
-| 2 | `PersonalMemory` (per-user facts, vocab mgmt, auto-upgrade dim) | |
-| 3 | `AuditTrail` split-pattern layer | |
-| 4 | Persistence (save/load state, serde-json + npy) | |
-| 5 | MCP server (port of `mp_mcp.py`) | |
-| 6 | Multi-target builds (Linux/Mac/Win/iOS/Android/WASM) | |
-| 7 | Language bindings (pyo3, napi-rs, JNI/UniFFI) | |
-| 8 | LongMemEval benchmark vs mem0/zep/letta | |
+| 1 | `AdaptiveMemory` shards + capacity rules | ✅ |
+| 2 | `PersonalMemory` (facts, vocab mgmt) | ✅ — sharding instead of auto-upgrade-dim |
+| 3 | `AuditTrail` split-pattern layer | ✅ |
+| 4 | Persistence (JSON + redb + ChaCha20-Poly1305 at-rest) | ✅ |
+| 5 | MCP server | ✅ (`mp-mcp-server-rs` bin) |
+| 6 | Multi-target builds (iOS/Android) | ✅ host + xcframework; Android `.so` needs NDK |
+| 7 | Language bindings (UniFFI Swift/Kotlin; pyo3) | ✅ |
+| 8 | LongMemEval-scale benchmark | ⏳ retrieval micro-bench done (BENCH.md); MIRACL-ru at scale pending |
 
 ## Why a port
 
@@ -62,8 +61,7 @@ to PyTorch deployments (~1 GB install). The Rust impl targets:
 ## Build + test
 
 ```bash
-cd rust/
-cargo test --release
+cargo test
 ```
 
 ## Architecture vs Python
