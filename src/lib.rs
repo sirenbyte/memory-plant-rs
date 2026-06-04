@@ -51,6 +51,7 @@ pub mod personal;
 pub mod audit;
 pub mod persistence;
 pub mod crypto;
+pub mod index;
 pub mod anthropic;
 pub mod openai;
 pub mod document;
@@ -72,4 +73,7 @@ pub use extractor::parse_facts_json;
 pub use document::{DocumentMemory, Encoder, MockEncoder, SearchHit, chunk_text};
 #[cfg(feature = "fastembed")]
 pub use document::FastembedEncoder;
+pub use index::{BruteForceIndex, VectorIndex};
+#[cfg(feature = "ann")]
+pub use index::HnswIndex;
 pub use service::MemoryService;

@@ -16,6 +16,9 @@ default = []
 # Pulls in ONNX Runtime + downloads a ~30 MB model on first use.
 # Without this feature, only MockEncoder is available (tests only).
 fastembed = ["dep:fastembed"]
+# Pure-Rust HNSW approximate-NN index (instant-distance) for large on-device
+# corpora. Off by default (brute-force exact is fine to ~10k vectors).
+ann = ["dep:instant-distance"]
 
 [dependencies]
 # N-dim arrays (numpy equivalent). f32 throughout — same as Python default.
@@ -40,6 +43,8 @@ chacha20poly1305 = "0.10"
 # Embedded ACID KV store for on-device persistence. Pure-Rust, no C deps,
 # wasm-compiles. Alternative to plaintext JSON files.
 redb = "2"
+# Pure-Rust HNSW ANN index (optional, feature `ann`). No C/C++ deps, wasm-clean.
+instant-distance = { version = "0.6", optional = true }
 # Regex extractor (default offline fact extraction).
 regex = "1.11"
 # Lightweight blocking HTTP client for LLM-extractor backends. Pure
