@@ -28,9 +28,11 @@
 //! so we can roundtrip without downloading models.
 
 use crate::hlb::cosine_similarity;
+use crate::persistence::PersistError;
 use ndarray::ArrayView1;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 
 /// Anything that can turn `[String]` into `Vec<Vec<f32>>` of fixed
 /// dimensionality. Send + Sync so DocumentMemory is share-able.
@@ -272,6 +274,47 @@ pub struct SearchHit {
     pub doc_id: String,
     pub score: f32,
     pub text: String,
+    /// Owning document's metadata (cloned). Lets callers filter/route on the
+    /// hit without a second lookup.
+    pub metadata: HashMap<String, serde_json::Value>,
+}
+
+/// Rich, out-of-box retrieval filter (parity with vector-DB libs like
+/// agentmemory). All set conditions are ANDed. An empty/`Default` filter
+/// matches everything. Applied on the EXACT scan path (the ANN fast-path is
+/// filter-blind and is bypassed whenever any condition is set).
+#[derive(Debug, Clone, Default)]
+pub struct SearchFilter {
+    /// Every entry must equal the owning document's metadata value (exact).
+    pub metadata: HashMap<String, serde_json::Value>,
+    /// Case-insensitive substring that must appear in the chunk text.
+    pub contains_text: Option<String>,
+    /// Minimum cosine score in [-1, 1]; hits below are dropped
+    /// (equivalent to a `max_distance = 1 - min_score` threshold).
+    pub min_score: Option<f32>,
+    /// Restrict the search to these document ids (None = all documents).
+    pub doc_ids: Option<Vec<String>>,
+}
+
+impl SearchFilter {
+    /// True when no condition is set — lets `search` take the ANN fast-path.
+    pub fn is_empty(&self) -> bool {
+        self.metadata.is_empty()
+            && self.contains_text.is_none()
+            && self.min_score.is_none()
+            && self.doc_ids.is_none()
+    }
+
+    fn doc_matches(&self, entry: &DocumentEntry) -> bool {
+        if let Some(ids) = &self.doc_ids {
+            if !ids.iter().any(|id| id == &entry.doc_id) {
+                return false;
+            }
+        }
+        self.metadata
+            .iter()
+            .all(|(k, v)| entry.metadata.get(k) == Some(v))
+    }
 }
 
 impl<E: Encoder> DocumentMemory<E> {
@@ -371,6 +414,21 @@ impl<E: Encoder> DocumentMemory<E> {
         changed
     }
 
+    /// Build a SearchHit for a chunk, attaching its document's metadata.
+    fn make_hit(&self, c: &Chunk, score: f32) -> SearchHit {
+        SearchHit {
+            chunk_id: c.id.clone(),
+            doc_id: c.doc_id.clone(),
+            score,
+            text: c.text(),
+            metadata: self
+                .documents
+                .get(&c.doc_id)
+                .map(|e| e.metadata.clone())
+                .unwrap_or_default(),
+        }
+    }
+
     /// Top-k cosine-similar chunks. Optional `filter` runs on each
     /// candidate's owning document metadata — None passes through all.
     pub fn semantic_search<F>(
@@ -398,12 +456,7 @@ impl<E: Encoder> DocumentMemory<E> {
                     .search(q, k)
                     .into_iter()
                     .filter_map(|(pos, score)| {
-                        self.chunks.get(pos as usize).map(|c| SearchHit {
-                            chunk_id: c.id.clone(),
-                            doc_id: c.doc_id.clone(),
-                            score,
-                            text: c.text(),
-                        })
+                        self.chunks.get(pos as usize).map(|c| self.make_hit(c, score))
                     })
                     .collect();
             }
@@ -434,17 +487,207 @@ impl<E: Encoder> DocumentMemory<E> {
         scored
             .into_iter()
             .take(k)
-            .map(|(score, c)| SearchHit {
-                chunk_id: c.id.clone(),
-                doc_id: c.doc_id.clone(),
-                score,
-                text: c.text(),
-            })
+            .map(|(score, c)| self.make_hit(c, score))
             .collect()
+    }
+
+    /// Add a document whose chunks are ALREADY embedded by the caller — no
+    /// internal encoder/ORT is used. This is the on-device path: split a file
+    /// with `chunk_text`, embed each chunk with the app's own model (or the
+    /// device LLM), then store here. `chunks` and `embeddings` must be the
+    /// same length. Re-adding a `doc_id` replaces it. Returns chunks indexed.
+    pub fn add_document_with_embeddings(
+        &mut self,
+        doc_id: impl Into<String>,
+        chunks: Vec<String>,
+        embeddings: Vec<Vec<f32>>,
+        metadata: HashMap<String, serde_json::Value>,
+    ) -> usize {
+        let doc_id = doc_id.into();
+        if chunks.len() != embeddings.len() || chunks.is_empty() {
+            return 0;
+        }
+        if self.documents.contains_key(&doc_id) {
+            self.forget_document(&doc_id);
+        }
+        let n = chunks.len();
+        for (i, (txt, emb)) in chunks.iter().zip(embeddings.into_iter()).enumerate() {
+            let preview: String = txt.chars().take(500).collect();
+            self.chunks.push(Chunk::new(
+                format!("{doc_id}#chunk_{i}"),
+                doc_id.clone(),
+                i,
+                &preview,
+                emb,
+            ));
+        }
+        self.documents.insert(
+            doc_id.clone(),
+            DocumentEntry { doc_id, metadata, n_chunks: n, added_ts: now() },
+        );
+        self.rebuild_ann();
+        n
+    }
+
+    /// Rich retrieval over a CALLER-SUPPLIED query embedding (no encoder/ORT).
+    /// Applies `filter` (metadata eq / contains_text / min_score / doc_ids).
+    /// Uses the ANN fast-path only when the filter is empty.
+    pub fn search(&self, query_emb: &[f32], k: usize, filter: &SearchFilter) -> Vec<SearchHit> {
+        if self.chunks.is_empty() || query_emb.is_empty() {
+            return Vec::new();
+        }
+        // ANN fast-path: no filter conditions only (the index is filter-blind).
+        if filter.is_empty() {
+            if let Some(idx) = &self.ann {
+                return idx
+                    .search(query_emb, k)
+                    .into_iter()
+                    .filter_map(|(pos, score)| {
+                        self.chunks.get(pos as usize).map(|c| self.make_hit(c, score))
+                    })
+                    .collect();
+            }
+        }
+        let needle = filter.contains_text.as_ref().map(|s| s.to_lowercase());
+        let q_view = ArrayView1::from(query_emb);
+        let mut scored: Vec<(f32, &Chunk)> = self
+            .chunks
+            .iter()
+            .filter(|c| {
+                // document-level filters (metadata / doc_ids) — cheap
+                self.documents.get(&c.doc_id).map_or(false, |e| filter.doc_matches(e))
+            })
+            .filter(|c| {
+                // chunk-level substring filter — decompress only when requested
+                needle.as_ref().map_or(true, |n| c.text().to_lowercase().contains(n))
+            })
+            .filter_map(|c| {
+                let cv = ArrayView1::from(c.embedding.as_slice());
+                cosine_similarity(q_view, cv).ok().map(|s| (s, c))
+            })
+            .filter(|(s, _)| filter.min_score.map_or(true, |m| *s >= m))
+            .collect();
+
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        scored.into_iter().take(k).map(|(score, c)| self.make_hit(c, score)).collect()
     }
 
     pub fn document(&self, doc_id: &str) -> Option<&DocumentEntry> {
         self.documents.get(doc_id)
+    }
+
+    /// All document ids currently stored.
+    pub fn document_ids(&self) -> Vec<String> {
+        self.documents.keys().cloned().collect()
+    }
+}
+
+// ============================================================
+// DocumentMemory persistence (plaintext JSON + sealed AEAD)
+// ============================================================
+
+const DOC_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Serialize, Deserialize)]
+struct ChunkSnapshot {
+    id: String,
+    doc_id: String,
+    idx: usize,
+    text: String, // decompressed; recompressed on load via Chunk::new
+    embedding: Vec<f32>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct DocumentSnapshot {
+    schema_version: u32,
+    chunk_size: usize,
+    chunk_overlap: usize,
+    documents: Vec<DocumentEntry>,
+    chunks: Vec<ChunkSnapshot>,
+}
+
+impl<E: Encoder> DocumentMemory<E> {
+    fn build_snapshot(&self) -> DocumentSnapshot {
+        DocumentSnapshot {
+            schema_version: DOC_SCHEMA_VERSION,
+            chunk_size: self.chunk_size,
+            chunk_overlap: self.chunk_overlap,
+            documents: self.documents.values().cloned().collect(),
+            chunks: self
+                .chunks
+                .iter()
+                .map(|c| ChunkSnapshot {
+                    id: c.id.clone(),
+                    doc_id: c.doc_id.clone(),
+                    idx: c.idx,
+                    text: c.text(),
+                    embedding: c.embedding.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    fn from_snapshot(snap: DocumentSnapshot, encoder: E) -> Result<Self, PersistError> {
+        if snap.schema_version != DOC_SCHEMA_VERSION {
+            return Err(PersistError::Corrupt(format!(
+                "document schema {} != {}",
+                snap.schema_version, DOC_SCHEMA_VERSION
+            )));
+        }
+        let mut dm = DocumentMemory::new(encoder).with_chunking(snap.chunk_size, snap.chunk_overlap);
+        for c in snap.chunks {
+            dm.chunks.push(Chunk::new(c.id, c.doc_id, c.idx, &c.text, c.embedding));
+        }
+        for d in snap.documents {
+            dm.documents.insert(d.doc_id.clone(), d);
+        }
+        dm.rebuild_ann();
+        Ok(dm)
+    }
+
+    /// Save the document store to `path/documents.json` (plaintext).
+    pub fn save_state(&self, path: impl AsRef<Path>) -> Result<(), PersistError> {
+        let path = path.as_ref();
+        std::fs::create_dir_all(path)?;
+        let json = serde_json::to_vec(&self.build_snapshot())?;
+        std::fs::write(path.join("documents.json"), json)?;
+        Ok(())
+    }
+
+    /// Restore from `path/documents.json`. Returns an empty store (not an
+    /// error) if the file is absent, so callers can open-or-create.
+    pub fn load_state(path: impl AsRef<Path>, encoder: E) -> Result<Self, PersistError> {
+        let file = path.as_ref().join("documents.json");
+        if !file.exists() {
+            return Ok(DocumentMemory::new(encoder));
+        }
+        let raw = std::fs::read(file)?;
+        let snap: DocumentSnapshot = serde_json::from_slice(&raw)?;
+        Self::from_snapshot(snap, encoder)
+    }
+
+    /// Encrypted-at-rest save (ChaCha20-Poly1305) → `path/documents.json.enc`.
+    /// File contents are sensitive, so this is the recommended on-device path.
+    pub fn save_state_sealed(&self, path: impl AsRef<Path>, key: &[u8; 32]) -> Result<(), PersistError> {
+        let path = path.as_ref();
+        std::fs::create_dir_all(path)?;
+        let bytes = serde_json::to_vec(&self.build_snapshot())?;
+        let sealed = crate::crypto::seal(&bytes, key);
+        std::fs::write(path.join("documents.json.enc"), sealed)?;
+        Ok(())
+    }
+
+    /// Restore from `path/documents.json.enc` (empty store if absent).
+    pub fn load_state_sealed(path: impl AsRef<Path>, key: &[u8; 32], encoder: E) -> Result<Self, PersistError> {
+        let file = path.as_ref().join("documents.json.enc");
+        if !file.exists() {
+            return Ok(DocumentMemory::new(encoder));
+        }
+        let sealed = std::fs::read(file)?;
+        let raw = crate::crypto::open(&sealed, key)
+            .map_err(|e| PersistError::Corrupt(e.to_string()))?;
+        let snap: DocumentSnapshot = serde_json::from_slice(&raw)?;
+        Self::from_snapshot(snap, encoder)
     }
 }
 
@@ -651,6 +894,97 @@ mod tests {
         let dm = make();
         let hits = dm.semantic_search::<fn(&DocumentEntry) -> bool>("anything", 5, None);
         assert!(hits.is_empty());
+    }
+
+    fn make_emb() -> DocumentMemory<MockEncoder> {
+        // dim=8 mock; we add chunks with explicit embeddings via the injection API.
+        DocumentMemory::new(MockEncoder::new(8))
+    }
+
+    #[test]
+    fn injection_add_and_search_with_filters() {
+        let mut dm = make_emb();
+        let mut meta_note: HashMap<String, serde_json::Value> = HashMap::new();
+        meta_note.insert("kind".into(), serde_json::json!("note"));
+        let mut meta_audit: HashMap<String, serde_json::Value> = HashMap::new();
+        meta_audit.insert("kind".into(), serde_json::json!("audit"));
+
+        dm.add_document_with_embeddings(
+            "a", vec!["alpha shopping list milk".into()],
+            vec![vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]], meta_note);
+        dm.add_document_with_embeddings(
+            "b", vec!["beta audit log entry".into()],
+            vec![vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]], meta_audit);
+
+        // Plain vector search: query close to doc 'a'.
+        let q = vec![0.9, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let hits = dm.search(&q, 5, &SearchFilter::default());
+        assert_eq!(hits[0].doc_id, "a");
+        assert_eq!(hits[0].metadata.get("kind"), Some(&serde_json::json!("note")));
+
+        // metadata filter → only audit docs.
+        let mut f = SearchFilter::default();
+        f.metadata.insert("kind".into(), serde_json::json!("audit"));
+        let hits = dm.search(&q, 5, &f);
+        assert!(hits.iter().all(|h| h.doc_id == "b"));
+
+        // contains_text filter (case-insensitive substring on chunk text).
+        let mut f2 = SearchFilter::default();
+        f2.contains_text = Some("SHOPPING".into());
+        let hits = dm.search(&q, 5, &f2);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].doc_id, "a");
+
+        // min_score threshold drops weak matches.
+        let mut f3 = SearchFilter::default();
+        f3.min_score = Some(0.95);
+        let hits = dm.search(&vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 5, &f3);
+        assert!(hits.iter().all(|h| h.score >= 0.95));
+        assert_eq!(hits[0].doc_id, "b");
+
+        // doc_ids restriction.
+        let mut f4 = SearchFilter::default();
+        f4.doc_ids = Some(vec!["b".into()]);
+        let hits = dm.search(&q, 5, &f4);
+        assert!(hits.iter().all(|h| h.doc_id == "b"));
+    }
+
+    #[test]
+    fn document_persistence_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut dm = make_emb();
+        dm.add_document_with_embeddings(
+            "big", vec!["chunk one text".into(), "chunk two text".into()],
+            vec![vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                 vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]],
+            HashMap::new());
+        dm.save_state(dir.path()).unwrap();
+
+        let dm2 = DocumentMemory::load_state(dir.path(), MockEncoder::new(8)).unwrap();
+        assert_eq!(dm2.n_documents(), 1);
+        assert_eq!(dm2.n_chunks(), 2);
+        let hits = dm2.search(&vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 1, &SearchFilter::default());
+        assert_eq!(hits[0].doc_id, "big");
+        assert!(hits[0].text.contains("chunk one"));
+    }
+
+    #[test]
+    fn document_sealed_roundtrip_and_no_plaintext() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = [3u8; 32];
+        let mut dm = make_emb();
+        dm.add_document_with_embeddings(
+            "secret", vec!["confidential file contents".into()],
+            vec![vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]], HashMap::new());
+        dm.save_state_sealed(dir.path(), &key).unwrap();
+
+        assert!(!dir.path().join("documents.json").exists(), "no plaintext doc dump");
+        assert!(dir.path().join("documents.json.enc").exists());
+
+        let ok = DocumentMemory::load_state_sealed(dir.path(), &key, MockEncoder::new(8)).unwrap();
+        assert_eq!(ok.n_documents(), 1);
+        // Wrong key → error.
+        assert!(DocumentMemory::load_state_sealed(dir.path(), &[9u8; 32], MockEncoder::new(8)).is_err());
     }
 
     #[test]

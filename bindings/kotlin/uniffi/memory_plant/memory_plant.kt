@@ -636,7 +636,13 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
         uniffiCheckApiChecksums(this)
     }
+    external fun uniffi_memory_plant_checksum_func_chunk_text(
+    ): Short
+    external fun uniffi_memory_plant_checksum_method_memoryplant_add_document(
+    ): Short
     external fun uniffi_memory_plant_checksum_method_memoryplant_export_user(
+    ): Short
+    external fun uniffi_memory_plant_checksum_method_memoryplant_forget_document(
     ): Short
     external fun uniffi_memory_plant_checksum_method_memoryplant_forget_fact(
     ): Short
@@ -644,11 +650,15 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_memory_plant_checksum_method_memoryplant_ingest_message(
     ): Short
+    external fun uniffi_memory_plant_checksum_method_memoryplant_n_documents(
+    ): Short
     external fun uniffi_memory_plant_checksum_method_memoryplant_recall_fact(
     ): Short
     external fun uniffi_memory_plant_checksum_method_memoryplant_save(
     ): Short
     external fun uniffi_memory_plant_checksum_method_memoryplant_save_sealed(
+    ): Short
+    external fun uniffi_memory_plant_checksum_method_memoryplant_search(
     ): Short
     external fun uniffi_memory_plant_checksum_method_memoryplant_store_fact(
     ): Short
@@ -688,24 +698,34 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_memory_plant_fn_constructor_memoryplant_new(`dim`: Int,`vocabCap`: Int,`user`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
+    external fun uniffi_memory_plant_fn_method_memoryplant_add_document(`ptr`: Long,`docId`: RustBuffer.ByValue,`chunks`: RustBuffer.ByValue,`embeddings`: RustBuffer.ByValue,`metadata`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
     external fun uniffi_memory_plant_fn_method_memoryplant_export_user(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_memory_plant_fn_method_memoryplant_forget_document(`ptr`: Long,`docId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     external fun uniffi_memory_plant_fn_method_memoryplant_forget_fact(`ptr`: Long,`predicate`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     external fun uniffi_memory_plant_fn_method_memoryplant_forget_user(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     external fun uniffi_memory_plant_fn_method_memoryplant_ingest_message(`ptr`: Long,`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_memory_plant_fn_method_memoryplant_n_documents(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
     external fun uniffi_memory_plant_fn_method_memoryplant_recall_fact(`ptr`: Long,`predicate`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_memory_plant_fn_method_memoryplant_save(`ptr`: Long,`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_memory_plant_fn_method_memoryplant_save_sealed(`ptr`: Long,`path`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_memory_plant_fn_method_memoryplant_search(`ptr`: Long,`queryEmbedding`: RustBuffer.ByValue,`k`: Int,`metadata`: RustBuffer.ByValue,`containsText`: RustBuffer.ByValue,`minScore`: RustBuffer.ByValue,`docIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_memory_plant_fn_method_memoryplant_store_fact(`ptr`: Long,`predicate`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_memory_plant_fn_method_memoryplant_total_facts(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
+    external fun uniffi_memory_plant_fn_func_chunk_text(`text`: RustBuffer.ByValue,`chunkSize`: Int,`chunkOverlap`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun ffi_memory_plant_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun ffi_memory_plant_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -825,7 +845,16 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_memory_plant_checksum_func_chunk_text() != 46396.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_memory_plant_checksum_method_memoryplant_add_document() != 25136.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_memory_plant_checksum_method_memoryplant_export_user() != 25242.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_memory_plant_checksum_method_memoryplant_forget_document() != 40957.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_memory_plant_checksum_method_memoryplant_forget_fact() != 7281.toShort()) {
@@ -837,13 +866,19 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_memory_plant_checksum_method_memoryplant_ingest_message() != 57551.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_memory_plant_checksum_method_memoryplant_n_documents() != 58161.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_memory_plant_checksum_method_memoryplant_recall_fact() != 49521.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_memory_plant_checksum_method_memoryplant_save() != 39292.toShort()) {
+    if (lib.uniffi_memory_plant_checksum_method_memoryplant_save() != 4065.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_memory_plant_checksum_method_memoryplant_save_sealed() != 5951.toShort()) {
+    if (lib.uniffi_memory_plant_checksum_method_memoryplant_save_sealed() != 64130.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_memory_plant_checksum_method_memoryplant_search() != 25442.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_memory_plant_checksum_method_memoryplant_store_fact() != 62977.toShort()) {
@@ -1067,6 +1102,29 @@ public object FfiConverterULong: FfiConverter<ULong, Long> {
 /**
  * @suppress
  */
+public object FfiConverterFloat: FfiConverter<Float, Float> {
+    override fun lift(value: Float): Float {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Float {
+        return buf.getFloat()
+    }
+
+    override fun lower(value: Float): Float {
+        return value
+    }
+
+    override fun allocationSize(value: Float) = 4UL
+
+    override fun write(value: Float, buf: ByteBuffer) {
+        buf.putFloat(value)
+    }
+}
+
+/**
+ * @suppress
+ */
 public object FfiConverterBoolean: FfiConverter<Boolean, Byte> {
     override fun lift(value: Byte): Boolean {
         return value.toInt() != 0
@@ -1261,13 +1319,32 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
 
 /**
  * On-device personal memory for a single user. Thread-safe.
+ *
+ * Holds two stores: the HLB fact bank (`inner`) and the document RAG store
+ * (`docs`). Document embeddings are supplied by the caller (the app's own
+ * embedder / on-device model) — Memory Plant does NOT bundle an embedding
+ * model in the FFI, so the binding stays light and ORT-free.
  */
 public interface MemoryPlantInterface {
+    
+    /**
+     * Index a document whose chunks are ALREADY embedded by the caller (the
+     * app's embedder / on-device model). Split a big file with the top-level
+     * `chunkText`, embed each chunk, then call this. `chunks` and `embeddings`
+     * must be the same length; re-using `docId` replaces it. Returns the
+     * number of chunks indexed.
+     */
+    fun `addDocument`(`docId`: kotlin.String, `chunks`: List<kotlin.String>, `embeddings`: List<List<kotlin.Float>>, `metadata`: Map<kotlin.String, kotlin.String>): kotlin.UInt
     
     /**
      * All stored facts: `{ "{subject}|{predicate}" -> value }`.
      */
     fun `exportUser`(): Map<kotlin.String, kotlin.String>
+    
+    /**
+     * Drop a document and all its chunks. Returns true if it existed.
+     */
+    fun `forgetDocument`(`docId`: kotlin.String): kotlin.Boolean
     
     fun `forgetFact`(`predicate`: kotlin.String): kotlin.Boolean
     
@@ -1278,21 +1355,35 @@ public interface MemoryPlantInterface {
     
     fun `ingestMessage`(`message`: kotlin.String): List<FactDto>
     
+    /**
+     * Number of indexed documents.
+     */
+    fun `nDocuments`(): kotlin.UInt
+    
     fun `recallFact`(`predicate`: kotlin.String): kotlin.String?
     
     /**
-     * Persist all users under `path` as a **plaintext** JSON tree. For
-     * privacy-first on-device storage use `saveSealed` instead.
+     * Persist facts AND documents under `path` as a **plaintext** JSON tree.
+     * For privacy-first on-device storage use `saveSealed` instead.
      */
     fun `save`(`path`: kotlin.String)
     
     /**
      * Encrypted-at-rest save (ChaCha20-Poly1305 AEAD): the whole on-disk
-     * footprint — values, keys, schema and service metadata — is sealed; no
-     * plaintext touches disk. `key` MUST be exactly 32 bytes; derive/store it
-     * in the iOS Keychain or Android Keystore. Pairs with `loadOrCreateSealed`.
+     * footprint — facts (values, keys, schema, service metadata) AND document
+     * chunks/embeddings — is sealed; no plaintext touches disk. `key` MUST be
+     * exactly 32 bytes; derive/store it in the iOS Keychain or Android
+     * Keystore. Pairs with `loadOrCreateSealed`.
      */
     fun `saveSealed`(`path`: kotlin.String, `key`: kotlin.ByteArray)
+    
+    /**
+     * Semantic search over a caller-supplied query embedding, with rich
+     * out-of-box filters (all ANDed): `metadata` exact-match, `containsText`
+     * case-insensitive substring, `minScore` cosine threshold, `docIds`
+     * restriction. Empty filters = pure top-k nearest.
+     */
+    fun `search`(`queryEmbedding`: List<kotlin.Float>, `k`: kotlin.UInt, `metadata`: Map<kotlin.String, kotlin.String>, `containsText`: kotlin.String?, `minScore`: kotlin.Float?, `docIds`: List<kotlin.String>?): List<DocHit>
     
     fun `storeFact`(`predicate`: kotlin.String, `value`: kotlin.String)
     
@@ -1303,6 +1394,11 @@ public interface MemoryPlantInterface {
 
 /**
  * On-device personal memory for a single user. Thread-safe.
+ *
+ * Holds two stores: the HLB fact bank (`inner`) and the document RAG store
+ * (`docs`). Document embeddings are supplied by the caller (the app's own
+ * embedder / on-device model) — Memory Plant does NOT bundle an embedding
+ * model in the FFI, so the binding stays light and ORT-free.
  */
 open class MemoryPlant: Disposable, AutoCloseable, MemoryPlantInterface
 {
@@ -1414,6 +1510,27 @@ open class MemoryPlant: Disposable, AutoCloseable, MemoryPlantInterface
 
     
     /**
+     * Index a document whose chunks are ALREADY embedded by the caller (the
+     * app's embedder / on-device model). Split a big file with the top-level
+     * `chunkText`, embed each chunk, then call this. `chunks` and `embeddings`
+     * must be the same length; re-using `docId` replaces it. Returns the
+     * number of chunks indexed.
+     */
+    @Throws(MpException::class)override fun `addDocument`(`docId`: kotlin.String, `chunks`: List<kotlin.String>, `embeddings`: List<List<kotlin.Float>>, `metadata`: Map<kotlin.String, kotlin.String>): kotlin.UInt {
+            return FfiConverterUInt.lift(
+    callWithHandle {
+    uniffiRustCallWithError(MpException) { _status ->
+    UniffiLib.uniffi_memory_plant_fn_method_memoryplant_add_document(
+        it,
+        FfiConverterString.lower(`docId`),FfiConverterSequenceString.lower(`chunks`),FfiConverterSequenceSequenceFloat.lower(`embeddings`),FfiConverterMapStringString.lower(`metadata`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * All stored facts: `{ "{subject}|{predicate}" -> value }`.
      */
     @Throws(MpException::class)override fun `exportUser`(): Map<kotlin.String, kotlin.String> {
@@ -1423,6 +1540,22 @@ open class MemoryPlant: Disposable, AutoCloseable, MemoryPlantInterface
     UniffiLib.uniffi_memory_plant_fn_method_memoryplant_export_user(
         it,
         _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Drop a document and all its chunks. Returns true if it existed.
+     */override fun `forgetDocument`(`docId`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_memory_plant_fn_method_memoryplant_forget_document(
+        it,
+        FfiConverterString.lower(`docId`),_status)
 }
     }
     )
@@ -1474,6 +1607,22 @@ open class MemoryPlant: Disposable, AutoCloseable, MemoryPlantInterface
     
 
     
+    /**
+     * Number of indexed documents.
+     */override fun `nDocuments`(): kotlin.UInt {
+            return FfiConverterUInt.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_memory_plant_fn_method_memoryplant_n_documents(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
     @Throws(MpException::class)override fun `recallFact`(`predicate`: kotlin.String): kotlin.String? {
             return FfiConverterOptionalString.lift(
     callWithHandle {
@@ -1489,8 +1638,8 @@ open class MemoryPlant: Disposable, AutoCloseable, MemoryPlantInterface
 
     
     /**
-     * Persist all users under `path` as a **plaintext** JSON tree. For
-     * privacy-first on-device storage use `saveSealed` instead.
+     * Persist facts AND documents under `path` as a **plaintext** JSON tree.
+     * For privacy-first on-device storage use `saveSealed` instead.
      */
     @Throws(MpException::class)override fun `save`(`path`: kotlin.String)
         = 
@@ -1507,9 +1656,10 @@ open class MemoryPlant: Disposable, AutoCloseable, MemoryPlantInterface
     
     /**
      * Encrypted-at-rest save (ChaCha20-Poly1305 AEAD): the whole on-disk
-     * footprint — values, keys, schema and service metadata — is sealed; no
-     * plaintext touches disk. `key` MUST be exactly 32 bytes; derive/store it
-     * in the iOS Keychain or Android Keystore. Pairs with `loadOrCreateSealed`.
+     * footprint — facts (values, keys, schema, service metadata) AND document
+     * chunks/embeddings — is sealed; no plaintext touches disk. `key` MUST be
+     * exactly 32 bytes; derive/store it in the iOS Keychain or Android
+     * Keystore. Pairs with `loadOrCreateSealed`.
      */
     @Throws(MpException::class)override fun `saveSealed`(`path`: kotlin.String, `key`: kotlin.ByteArray)
         = 
@@ -1521,6 +1671,25 @@ open class MemoryPlant: Disposable, AutoCloseable, MemoryPlantInterface
 }
     }
     
+    
+
+    
+    /**
+     * Semantic search over a caller-supplied query embedding, with rich
+     * out-of-box filters (all ANDed): `metadata` exact-match, `containsText`
+     * case-insensitive substring, `minScore` cosine threshold, `docIds`
+     * restriction. Empty filters = pure top-k nearest.
+     */override fun `search`(`queryEmbedding`: List<kotlin.Float>, `k`: kotlin.UInt, `metadata`: Map<kotlin.String, kotlin.String>, `containsText`: kotlin.String?, `minScore`: kotlin.Float?, `docIds`: List<kotlin.String>?): List<DocHit> {
+            return FfiConverterSequenceTypeDocHit.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_memory_plant_fn_method_memoryplant_search(
+        it,
+        FfiConverterSequenceFloat.lower(`queryEmbedding`),FfiConverterUInt.lower(`k`),FfiConverterMapStringString.lower(`metadata`),FfiConverterOptionalString.lower(`containsText`),FfiConverterOptionalFloat.lower(`minScore`),FfiConverterOptionalSequenceString.lower(`docIds`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -1626,6 +1795,62 @@ public object FfiConverterTypeMemoryPlant: FfiConverter<MemoryPlant, Long> {
 
     override fun write(value: MemoryPlant, buf: ByteBuffer) {
         buf.putLong(lower(value))
+    }
+}
+
+
+
+/**
+ * A document-search hit returned by `search`. Metadata values are stringified.
+ */
+data class DocHit (
+    var `chunkId`: kotlin.String
+    , 
+    var `docId`: kotlin.String
+    , 
+    var `score`: kotlin.Float
+    , 
+    var `text`: kotlin.String
+    , 
+    var `metadata`: Map<kotlin.String, kotlin.String>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDocHit: FfiConverterRustBuffer<DocHit> {
+    override fun read(buf: ByteBuffer): DocHit {
+        return DocHit(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterFloat.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterMapStringString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: DocHit) = (
+            FfiConverterString.allocationSize(value.`chunkId`) +
+            FfiConverterString.allocationSize(value.`docId`) +
+            FfiConverterFloat.allocationSize(value.`score`) +
+            FfiConverterString.allocationSize(value.`text`) +
+            FfiConverterMapStringString.allocationSize(value.`metadata`)
+    )
+
+    override fun write(value: DocHit, buf: ByteBuffer) {
+            FfiConverterString.write(value.`chunkId`, buf)
+            FfiConverterString.write(value.`docId`, buf)
+            FfiConverterFloat.write(value.`score`, buf)
+            FfiConverterString.write(value.`text`, buf)
+            FfiConverterMapStringString.write(value.`metadata`, buf)
     }
 }
 
@@ -1745,6 +1970,38 @@ public object FfiConverterTypeMpError : FfiConverterRustBuffer<MpException> {
 /**
  * @suppress
  */
+public object FfiConverterOptionalFloat: FfiConverterRustBuffer<kotlin.Float?> {
+    override fun read(buf: ByteBuffer): kotlin.Float? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterFloat.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Float?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterFloat.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Float?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterFloat.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?> {
     override fun read(buf: ByteBuffer): kotlin.String? {
         if (buf.get().toInt() == 0) {
@@ -1777,6 +2034,122 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
 /**
  * @suppress
  */
+public object FfiConverterOptionalSequenceString: FfiConverterRustBuffer<List<kotlin.String>?> {
+    override fun read(buf: ByteBuffer): List<kotlin.String>? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterSequenceString.read(buf)
+    }
+
+    override fun allocationSize(value: List<kotlin.String>?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterSequenceString.allocationSize(value)
+        }
+    }
+
+    override fun write(value: List<kotlin.String>?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterSequenceString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceFloat: FfiConverterRustBuffer<List<kotlin.Float>> {
+    override fun read(buf: ByteBuffer): List<kotlin.Float> {
+        val len = buf.getInt()
+        return List<kotlin.Float>(len) {
+            FfiConverterFloat.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.Float>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterFloat.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.Float>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterFloat.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.String>> {
+    override fun read(buf: ByteBuffer): List<kotlin.String> {
+        val len = buf.getInt()
+        return List<kotlin.String>(len) {
+            FfiConverterString.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.String>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterString.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.String>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterString.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeDocHit: FfiConverterRustBuffer<List<DocHit>> {
+    override fun read(buf: ByteBuffer): List<DocHit> {
+        val len = buf.getInt()
+        return List<DocHit>(len) {
+            FfiConverterTypeDocHit.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<DocHit>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeDocHit.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<DocHit>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeDocHit.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeFactDto: FfiConverterRustBuffer<List<FactDto>> {
     override fun read(buf: ByteBuffer): List<FactDto> {
         val len = buf.getInt()
@@ -1795,6 +2168,34 @@ public object FfiConverterSequenceTypeFactDto: FfiConverterRustBuffer<List<FactD
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeFactDto.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceSequenceFloat: FfiConverterRustBuffer<List<List<kotlin.Float>>> {
+    override fun read(buf: ByteBuffer): List<List<kotlin.Float>> {
+        val len = buf.getInt()
+        return List<List<kotlin.Float>>(len) {
+            FfiConverterSequenceFloat.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<List<kotlin.Float>>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterSequenceFloat.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<List<kotlin.Float>>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterSequenceFloat.write(it, buf)
         }
     }
 }
@@ -1837,4 +2238,18 @@ public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.Str
         }
     }
 }
+        /**
+         * Split a large file/text into overlapping word-window chunks (pure Rust, no
+         * model needed). Embed each chunk with your own model, then `addDocument`.
+         */ fun `chunkText`(`text`: kotlin.String, `chunkSize`: kotlin.UInt, `chunkOverlap`: kotlin.UInt): List<kotlin.String> {
+            return FfiConverterSequenceString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_memory_plant_fn_func_chunk_text(
+    
+        FfiConverterString.lower(`text`),FfiConverterUInt.lower(`chunkSize`),FfiConverterUInt.lower(`chunkOverlap`),_status)
+}
+    )
+    }
+    
+
 

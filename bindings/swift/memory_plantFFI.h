@@ -268,9 +268,19 @@ uint64_t uniffi_memory_plant_fn_constructor_memoryplant_load_or_create_sealed(Ru
 uint64_t uniffi_memory_plant_fn_constructor_memoryplant_new(uint32_t dim, uint32_t vocab_cap, RustBuffer user, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_ADD_DOCUMENT
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_ADD_DOCUMENT
+uint32_t uniffi_memory_plant_fn_method_memoryplant_add_document(uint64_t ptr, RustBuffer doc_id, RustBuffer chunks, RustBuffer embeddings, RustBuffer metadata, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_EXPORT_USER
 #define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_EXPORT_USER
 RustBuffer uniffi_memory_plant_fn_method_memoryplant_export_user(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_FORGET_DOCUMENT
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_FORGET_DOCUMENT
+int8_t uniffi_memory_plant_fn_method_memoryplant_forget_document(uint64_t ptr, RustBuffer doc_id, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_FORGET_FACT
@@ -288,6 +298,11 @@ int8_t uniffi_memory_plant_fn_method_memoryplant_forget_user(uint64_t ptr, RustC
 RustBuffer uniffi_memory_plant_fn_method_memoryplant_ingest_message(uint64_t ptr, RustBuffer message, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_N_DOCUMENTS
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_N_DOCUMENTS
+uint32_t uniffi_memory_plant_fn_method_memoryplant_n_documents(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_RECALL_FACT
 #define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_RECALL_FACT
 RustBuffer uniffi_memory_plant_fn_method_memoryplant_recall_fact(uint64_t ptr, RustBuffer predicate, RustCallStatus *_Nonnull out_status
@@ -303,6 +318,11 @@ void uniffi_memory_plant_fn_method_memoryplant_save(uint64_t ptr, RustBuffer pat
 void uniffi_memory_plant_fn_method_memoryplant_save_sealed(uint64_t ptr, RustBuffer path, RustBuffer key, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_SEARCH
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_SEARCH
+RustBuffer uniffi_memory_plant_fn_method_memoryplant_search(uint64_t ptr, RustBuffer query_embedding, uint32_t k, RustBuffer metadata, RustBuffer contains_text, RustBuffer min_score, RustBuffer doc_ids, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_STORE_FACT
 #define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_STORE_FACT
 void uniffi_memory_plant_fn_method_memoryplant_store_fact(uint64_t ptr, RustBuffer predicate, RustBuffer value, RustCallStatus *_Nonnull out_status
@@ -311,6 +331,11 @@ void uniffi_memory_plant_fn_method_memoryplant_store_fact(uint64_t ptr, RustBuff
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_TOTAL_FACTS
 #define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_TOTAL_FACTS
 uint64_t uniffi_memory_plant_fn_method_memoryplant_total_facts(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_FUNC_CHUNK_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_FUNC_CHUNK_TEXT
+RustBuffer uniffi_memory_plant_fn_func_chunk_text(RustBuffer text, uint32_t chunk_size, uint32_t chunk_overlap, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_MEMORY_PLANT_RUSTBUFFER_ALLOC
@@ -573,9 +598,27 @@ void ffi_memory_plant_rust_future_free_void(uint64_t handle
 void ffi_memory_plant_rust_future_complete_void(uint64_t handle, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_FUNC_CHUNK_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_FUNC_CHUNK_TEXT
+uint16_t uniffi_memory_plant_checksum_func_chunk_text(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_ADD_DOCUMENT
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_ADD_DOCUMENT
+uint16_t uniffi_memory_plant_checksum_method_memoryplant_add_document(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_EXPORT_USER
 #define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_EXPORT_USER
 uint16_t uniffi_memory_plant_checksum_method_memoryplant_export_user(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_FORGET_DOCUMENT
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_FORGET_DOCUMENT
+uint16_t uniffi_memory_plant_checksum_method_memoryplant_forget_document(void
     
 );
 #endif
@@ -597,6 +640,12 @@ uint16_t uniffi_memory_plant_checksum_method_memoryplant_ingest_message(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_N_DOCUMENTS
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_N_DOCUMENTS
+uint16_t uniffi_memory_plant_checksum_method_memoryplant_n_documents(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_RECALL_FACT
 #define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_RECALL_FACT
 uint16_t uniffi_memory_plant_checksum_method_memoryplant_recall_fact(void
@@ -612,6 +661,12 @@ uint16_t uniffi_memory_plant_checksum_method_memoryplant_save(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_SAVE_SEALED
 #define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_SAVE_SEALED
 uint16_t uniffi_memory_plant_checksum_method_memoryplant_save_sealed(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_SEARCH
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_SEARCH
+uint16_t uniffi_memory_plant_checksum_method_memoryplant_search(void
     
 );
 #endif

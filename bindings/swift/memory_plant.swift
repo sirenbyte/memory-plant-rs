@@ -451,6 +451,22 @@ fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterFloat: FfiConverterPrimitive {
+    typealias FfiType = Float
+    typealias SwiftType = Float
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Float {
+        return try lift(readFloat(&buf))
+    }
+
+    public static func write(_ value: Float, into buf: inout [UInt8]) {
+        writeFloat(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterBool : FfiConverter {
     typealias FfiType = Int8
     typealias SwiftType = Bool
@@ -536,13 +552,32 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 
 /**
  * On-device personal memory for a single user. Thread-safe.
+ *
+ * Holds two stores: the HLB fact bank (`inner`) and the document RAG store
+ * (`docs`). Document embeddings are supplied by the caller (the app's own
+ * embedder / on-device model) — Memory Plant does NOT bundle an embedding
+ * model in the FFI, so the binding stays light and ORT-free.
  */
 public protocol MemoryPlantProtocol: AnyObject, Sendable {
+    
+    /**
+     * Index a document whose chunks are ALREADY embedded by the caller (the
+     * app's embedder / on-device model). Split a big file with the top-level
+     * `chunkText`, embed each chunk, then call this. `chunks` and `embeddings`
+     * must be the same length; re-using `docId` replaces it. Returns the
+     * number of chunks indexed.
+     */
+    func addDocument(docId: String, chunks: [String], embeddings: [[Float]], metadata: [String: String]) throws  -> UInt32
     
     /**
      * All stored facts: `{ "{subject}|{predicate}" -> value }`.
      */
     func exportUser() throws  -> [String: String]
+    
+    /**
+     * Drop a document and all its chunks. Returns true if it existed.
+     */
+    func forgetDocument(docId: String)  -> Bool
     
     func forgetFact(predicate: String) throws  -> Bool
     
@@ -553,21 +588,35 @@ public protocol MemoryPlantProtocol: AnyObject, Sendable {
     
     func ingestMessage(message: String) throws  -> [FactDto]
     
+    /**
+     * Number of indexed documents.
+     */
+    func nDocuments()  -> UInt32
+    
     func recallFact(predicate: String) throws  -> String?
     
     /**
-     * Persist all users under `path` as a **plaintext** JSON tree. For
-     * privacy-first on-device storage use `saveSealed` instead.
+     * Persist facts AND documents under `path` as a **plaintext** JSON tree.
+     * For privacy-first on-device storage use `saveSealed` instead.
      */
     func save(path: String) throws 
     
     /**
      * Encrypted-at-rest save (ChaCha20-Poly1305 AEAD): the whole on-disk
-     * footprint — values, keys, schema and service metadata — is sealed; no
-     * plaintext touches disk. `key` MUST be exactly 32 bytes; derive/store it
-     * in the iOS Keychain or Android Keystore. Pairs with `loadOrCreateSealed`.
+     * footprint — facts (values, keys, schema, service metadata) AND document
+     * chunks/embeddings — is sealed; no plaintext touches disk. `key` MUST be
+     * exactly 32 bytes; derive/store it in the iOS Keychain or Android
+     * Keystore. Pairs with `loadOrCreateSealed`.
      */
     func saveSealed(path: String, key: Data) throws 
+    
+    /**
+     * Semantic search over a caller-supplied query embedding, with rich
+     * out-of-box filters (all ANDed): `metadata` exact-match, `containsText`
+     * case-insensitive substring, `minScore` cosine threshold, `docIds`
+     * restriction. Empty filters = pure top-k nearest.
+     */
+    func search(queryEmbedding: [Float], k: UInt32, metadata: [String: String], containsText: String?, minScore: Float?, docIds: [String]?)  -> [DocHit]
     
     func storeFact(predicate: String, value: String) throws 
     
@@ -576,6 +625,11 @@ public protocol MemoryPlantProtocol: AnyObject, Sendable {
 }
 /**
  * On-device personal memory for a single user. Thread-safe.
+ *
+ * Holds two stores: the HLB fact bank (`inner`) and the document RAG store
+ * (`docs`). Document embeddings are supplied by the caller (the app's own
+ * embedder / on-device model) — Memory Plant does NOT bundle an embedding
+ * model in the FFI, so the binding stays light and ORT-free.
  */
 open class MemoryPlant: MemoryPlantProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
@@ -688,12 +742,43 @@ public static func loadOrCreateSealed(path: String, key: Data, dim: UInt32, voca
 
     
     /**
+     * Index a document whose chunks are ALREADY embedded by the caller (the
+     * app's embedder / on-device model). Split a big file with the top-level
+     * `chunkText`, embed each chunk, then call this. `chunks` and `embeddings`
+     * must be the same length; re-using `docId` replaces it. Returns the
+     * number of chunks indexed.
+     */
+open func addDocument(docId: String, chunks: [String], embeddings: [[Float]], metadata: [String: String])throws  -> UInt32  {
+    return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypeMpError_lift) {
+    uniffi_memory_plant_fn_method_memoryplant_add_document(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(docId),
+        FfiConverterSequenceString.lower(chunks),
+        FfiConverterSequenceSequenceFloat.lower(embeddings),
+        FfiConverterDictionaryStringString.lower(metadata),$0
+    )
+})
+}
+    
+    /**
      * All stored facts: `{ "{subject}|{predicate}" -> value }`.
      */
 open func exportUser()throws  -> [String: String]  {
     return try  FfiConverterDictionaryStringString.lift(try rustCallWithError(FfiConverterTypeMpError_lift) {
     uniffi_memory_plant_fn_method_memoryplant_export_user(
             self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Drop a document and all its chunks. Returns true if it existed.
+     */
+open func forgetDocument(docId: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_memory_plant_fn_method_memoryplant_forget_document(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(docId),$0
     )
 })
 }
@@ -727,6 +812,17 @@ open func ingestMessage(message: String)throws  -> [FactDto]  {
 })
 }
     
+    /**
+     * Number of indexed documents.
+     */
+open func nDocuments() -> UInt32  {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+    uniffi_memory_plant_fn_method_memoryplant_n_documents(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
 open func recallFact(predicate: String)throws  -> String?  {
     return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeMpError_lift) {
     uniffi_memory_plant_fn_method_memoryplant_recall_fact(
@@ -737,8 +833,8 @@ open func recallFact(predicate: String)throws  -> String?  {
 }
     
     /**
-     * Persist all users under `path` as a **plaintext** JSON tree. For
-     * privacy-first on-device storage use `saveSealed` instead.
+     * Persist facts AND documents under `path` as a **plaintext** JSON tree.
+     * For privacy-first on-device storage use `saveSealed` instead.
      */
 open func save(path: String)throws   {try rustCallWithError(FfiConverterTypeMpError_lift) {
     uniffi_memory_plant_fn_method_memoryplant_save(
@@ -750,9 +846,10 @@ open func save(path: String)throws   {try rustCallWithError(FfiConverterTypeMpEr
     
     /**
      * Encrypted-at-rest save (ChaCha20-Poly1305 AEAD): the whole on-disk
-     * footprint — values, keys, schema and service metadata — is sealed; no
-     * plaintext touches disk. `key` MUST be exactly 32 bytes; derive/store it
-     * in the iOS Keychain or Android Keystore. Pairs with `loadOrCreateSealed`.
+     * footprint — facts (values, keys, schema, service metadata) AND document
+     * chunks/embeddings — is sealed; no plaintext touches disk. `key` MUST be
+     * exactly 32 bytes; derive/store it in the iOS Keychain or Android
+     * Keystore. Pairs with `loadOrCreateSealed`.
      */
 open func saveSealed(path: String, key: Data)throws   {try rustCallWithError(FfiConverterTypeMpError_lift) {
     uniffi_memory_plant_fn_method_memoryplant_save_sealed(
@@ -761,6 +858,26 @@ open func saveSealed(path: String, key: Data)throws   {try rustCallWithError(Ffi
         FfiConverterData.lower(key),$0
     )
 }
+}
+    
+    /**
+     * Semantic search over a caller-supplied query embedding, with rich
+     * out-of-box filters (all ANDed): `metadata` exact-match, `containsText`
+     * case-insensitive substring, `minScore` cosine threshold, `docIds`
+     * restriction. Empty filters = pure top-k nearest.
+     */
+open func search(queryEmbedding: [Float], k: UInt32, metadata: [String: String], containsText: String?, minScore: Float?, docIds: [String]?) -> [DocHit]  {
+    return try!  FfiConverterSequenceTypeDocHit.lift(try! rustCall() {
+    uniffi_memory_plant_fn_method_memoryplant_search(
+            self.uniffiCloneHandle(),
+        FfiConverterSequenceFloat.lower(queryEmbedding),
+        FfiConverterUInt32.lower(k),
+        FfiConverterDictionaryStringString.lower(metadata),
+        FfiConverterOptionString.lower(containsText),
+        FfiConverterOptionFloat.lower(minScore),
+        FfiConverterOptionSequenceString.lower(docIds),$0
+    )
+})
 }
     
 open func storeFact(predicate: String, value: String)throws   {try rustCallWithError(FfiConverterTypeMpError_lift) {
@@ -826,6 +943,75 @@ public func FfiConverterTypeMemoryPlant_lower(_ value: MemoryPlant) -> UInt64 {
 }
 
 
+
+
+/**
+ * A document-search hit returned by `search`. Metadata values are stringified.
+ */
+public struct DocHit: Equatable, Hashable {
+    public var chunkId: String
+    public var docId: String
+    public var score: Float
+    public var text: String
+    public var metadata: [String: String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(chunkId: String, docId: String, score: Float, text: String, metadata: [String: String]) {
+        self.chunkId = chunkId
+        self.docId = docId
+        self.score = score
+        self.text = text
+        self.metadata = metadata
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension DocHit: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDocHit: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DocHit {
+        return
+            try DocHit(
+                chunkId: FfiConverterString.read(from: &buf), 
+                docId: FfiConverterString.read(from: &buf), 
+                score: FfiConverterFloat.read(from: &buf), 
+                text: FfiConverterString.read(from: &buf), 
+                metadata: FfiConverterDictionaryStringString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DocHit, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.chunkId, into: &buf)
+        FfiConverterString.write(value.docId, into: &buf)
+        FfiConverterFloat.write(value.score, into: &buf)
+        FfiConverterString.write(value.text, into: &buf)
+        FfiConverterDictionaryStringString.write(value.metadata, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDocHit_lift(_ buf: RustBuffer) throws -> DocHit {
+    return try FfiConverterTypeDocHit.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDocHit_lower(_ value: DocHit) -> RustBuffer {
+    return FfiConverterTypeDocHit.lower(value)
+}
 
 
 public struct FactDto: Equatable, Hashable {
@@ -966,6 +1152,30 @@ public func FfiConverterTypeMpError_lower(_ value: MpError) -> RustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionFloat: FfiConverterRustBuffer {
+    typealias SwiftType = Float?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterFloat.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterFloat.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
@@ -984,6 +1194,105 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
         case 1: return try FfiConverterString.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterSequenceString.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterSequenceString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceFloat: FfiConverterRustBuffer {
+    typealias SwiftType = [Float]
+
+    public static func write(_ value: [Float], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterFloat.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Float] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Float]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterFloat.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]
+
+    public static func write(_ value: [String], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterString.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [String]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeDocHit: FfiConverterRustBuffer {
+    typealias SwiftType = [DocHit]
+
+    public static func write(_ value: [DocHit], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeDocHit.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [DocHit] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [DocHit]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeDocHit.read(from: &buf))
+        }
+        return seq
     }
 }
 
@@ -1015,6 +1324,31 @@ fileprivate struct FfiConverterSequenceTypeFactDto: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceSequenceFloat: FfiConverterRustBuffer {
+    typealias SwiftType = [[Float]]
+
+    public static func write(_ value: [[Float]], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterSequenceFloat.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [[Float]] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [[Float]]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterSequenceFloat.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
     public static func write(_ value: [String: String], into buf: inout [UInt8]) {
         let len = Int32(value.count)
@@ -1037,6 +1371,19 @@ fileprivate struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
         return dict
     }
 }
+/**
+ * Split a large file/text into overlapping word-window chunks (pure Rust, no
+ * model needed). Embed each chunk with your own model, then `addDocument`.
+ */
+public func chunkText(text: String, chunkSize: UInt32, chunkOverlap: UInt32) -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_memory_plant_fn_func_chunk_text(
+        FfiConverterString.lower(text),
+        FfiConverterUInt32.lower(chunkSize),
+        FfiConverterUInt32.lower(chunkOverlap),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -1053,7 +1400,16 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_memory_plant_checksum_func_chunk_text() != 46396) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_memory_plant_checksum_method_memoryplant_add_document() != 25136) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_memory_plant_checksum_method_memoryplant_export_user() != 25242) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_memory_plant_checksum_method_memoryplant_forget_document() != 40957) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_memory_plant_checksum_method_memoryplant_forget_fact() != 7281) {
@@ -1065,13 +1421,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_memory_plant_checksum_method_memoryplant_ingest_message() != 57551) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_memory_plant_checksum_method_memoryplant_n_documents() != 58161) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_memory_plant_checksum_method_memoryplant_recall_fact() != 49521) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_memory_plant_checksum_method_memoryplant_save() != 39292) {
+    if (uniffi_memory_plant_checksum_method_memoryplant_save() != 4065) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_memory_plant_checksum_method_memoryplant_save_sealed() != 5951) {
+    if (uniffi_memory_plant_checksum_method_memoryplant_save_sealed() != 64130) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_memory_plant_checksum_method_memoryplant_search() != 25442) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_memory_plant_checksum_method_memoryplant_store_fact() != 62977) {

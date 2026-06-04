@@ -17,9 +17,18 @@ MemoryPlant.loadOrCreate(path, dim, …, user)   // ctor: DURABLE — load from 
   exportUser() -> [String: String]              // {"subject|predicate": value}
   forgetUser() -> Bool                          // drop the whole user (Art. 17)
   totalFacts() -> UInt64
-  save(path)                                    // persist (plaintext JSON tree)
+  save(path)                                    // persist facts + documents (plaintext)
+
+  // --- Document RAG (semantic search over chunked files) ---
+  addDocument(docId, chunks, embeddings, metadata) -> n    // caller-embedded chunks
+  search(queryEmbedding, k, metadata, containsText, minScore, docIds) -> [DocHit]
+  forgetDocument(docId) -> Bool
+  nDocuments() -> UInt32
+
+chunkText(text, chunkSize, chunkOverlap) -> [String]   // free fn: split a big file
 
 struct FactDto { subject, predicate, obj, source }
+struct DocHit  { chunkId, docId, score, text, metadata }
 enum  MpError  { Memory(msg) }                  // thrown as Swift `throws` / Kotlin exception
 ```
 
@@ -40,10 +49,25 @@ must match across save/load — a wrong key fails AEAD authentication (no silent
 fallback). Derive/store it in the **iOS Keychain** / **Android Keystore**; never
 hardcode it. (Don't mix `save` and `saveSealed` at the same `path` — pick one.)
 
-Heavy/optional surfaces (fastembed/ORT embeddings, ANN index, the LLM
-extractors, document semantic-search) are **intentionally not** in the FFI — the
-mobile binding stays light and cross-compiles without ONNX Runtime. The default
-extractor is the offline `RegexExtractor`.
+**Document RAG (store big files + semantic search).** The FFI does document RAG
+**without bundling an embedding model** — the app supplies the vectors, keeping
+the binding light and ORT-free. Flow for a large file:
+
+1. `chunkText(text, size, overlap)` — pure-Rust word-window split (no model). Free.
+2. Embed each chunk with **your own** embedder (a small on-device model, the
+   device LLM, or e5 via ORT when available).
+3. `addDocument(docId, chunks, embeddings, metadata)` — store them.
+4. `search(queryEmbedding, k, metadata, containsText, minScore, docIds)` —
+   top-k cosine with **rich out-of-box filters** (all ANDed): metadata exact
+   match, case-insensitive substring, min cosine score, doc-id restriction.
+
+Documents persist (and encrypt) alongside facts via `save`/`saveSealed`.
+
+The heavy embedding step is deliberately the caller's job. An *internal* e5
+encoder (`FastembedEncoder::multilingual`) exists in the engine behind
+`--features fastembed` for host/when-ORT-is-available, but is not wired into the
+default FFI. Other heavy/optional surfaces (ANN index, LLM fact-extractors) are
+also out of the FFI; the default fact extractor is the offline `RegexExtractor`.
 
 ## Status (2026-06-04)
 
@@ -132,6 +156,23 @@ try mp.saveSealed(path: dir, key: key)                      // persist on suspen
 print(mp.totalFacts())
 
 // Plaintext alternative (no key): MemoryPlant.loadOrCreate(path:…) + mp.save(path:)
+```
+
+### Document RAG over a big file (Swift)
+
+```swift
+// 1. split  2. embed (your model)  3. store  4. search
+let chunks = chunkText(text: bigFileText, chunkSize: 200, chunkOverlap: 20)
+let embeddings: [[Float]] = chunks.map { myEmbedder.embed($0) }   // your on-device model
+_ = try mp.addDocument(docId: "report.pdf", chunks: chunks,
+                       embeddings: embeddings, metadata: ["kind": "pdf"])
+try mp.saveSealed(path: dir, key: key)
+
+let q = myEmbedder.embed("what did the report say about Q3 revenue?")
+let hits = mp.search(queryEmbedding: q, k: 5,
+                     metadata: ["kind": "pdf"],     // filter
+                     containsText: nil, minScore: 0.3, docIds: nil)
+for h in hits { print(h.docId, h.score, h.text) }
 ```
 
 ## Android usage (Kotlin)

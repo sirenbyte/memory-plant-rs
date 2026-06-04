@@ -14,6 +14,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::document::{DocumentMemory, MockEncoder, SearchFilter, SearchHit};
 use crate::extractor::{Extractor, RegexExtractor};
 use crate::fact::Fact;
 use crate::service::MemoryService;
@@ -24,6 +25,28 @@ pub struct FactDto {
     pub predicate: String,
     pub obj: String,
     pub source: String,
+}
+
+/// A document-search hit returned by `search`. Metadata values are stringified.
+#[derive(uniffi::Record)]
+pub struct DocHit {
+    pub chunk_id: String,
+    pub doc_id: String,
+    pub score: f32,
+    pub text: String,
+    pub metadata: HashMap<String, String>,
+}
+
+impl From<SearchHit> for DocHit {
+    fn from(h: SearchHit) -> Self {
+        Self {
+            chunk_id: h.chunk_id,
+            doc_id: h.doc_id,
+            score: h.score,
+            text: h.text,
+            metadata: h.metadata.into_iter().map(|(k, v)| (k, json_to_string(&v))).collect(),
+        }
+    }
 }
 
 impl From<Fact> for FactDto {
@@ -50,9 +73,15 @@ impl MpError {
 }
 
 /// On-device personal memory for a single user. Thread-safe.
+///
+/// Holds two stores: the HLB fact bank (`inner`) and the document RAG store
+/// (`docs`). Document embeddings are supplied by the caller (the app's own
+/// embedder / on-device model) — Memory Plant does NOT bundle an embedding
+/// model in the FFI, so the binding stays light and ORT-free.
 #[derive(uniffi::Object)]
 pub struct MemoryPlant {
     inner: Mutex<MemoryService>,
+    docs: Mutex<DocumentMemory<MockEncoder>>,
     user: String,
 }
 
@@ -64,7 +93,11 @@ impl MemoryPlant {
     pub fn new(dim: u32, vocab_cap: u32, user: String) -> Arc<Self> {
         let factory = || -> Arc<dyn Extractor> { Arc::new(RegexExtractor::new()) };
         let svc = MemoryService::new(factory, dim as usize, vocab_cap as usize);
-        Arc::new(Self { inner: Mutex::new(svc), user })
+        Arc::new(Self {
+            inner: Mutex::new(svc),
+            docs: Mutex::new(new_doc_store()),
+            user,
+        })
     }
 
     /// Open a DURABLE engine: load the state previously written by `save` at
@@ -87,7 +120,12 @@ impl MemoryPlant {
         } else {
             MemoryService::new(factory, dim as usize, vocab_cap as usize)
         };
-        Ok(Arc::new(Self { inner: Mutex::new(svc), user }))
+        let docs = DocumentMemory::load_state(&path, MockEncoder::new(1)).map_err(MpError::from_err)?;
+        Ok(Arc::new(Self {
+            inner: Mutex::new(svc),
+            docs: Mutex::new(docs),
+            user,
+        }))
     }
 
     /// Durable + ENCRYPTED engine: decrypt and load the sealed state at `path`
@@ -111,7 +149,13 @@ impl MemoryPlant {
         } else {
             MemoryService::new(factory, dim as usize, vocab_cap as usize)
         };
-        Ok(Arc::new(Self { inner: Mutex::new(svc), user }))
+        let docs = DocumentMemory::load_state_sealed(&path, &k, MockEncoder::new(1))
+            .map_err(MpError::from_err)?;
+        Ok(Arc::new(Self {
+            inner: Mutex::new(svc),
+            docs: Mutex::new(docs),
+            user,
+        }))
     }
 
     pub fn store_fact(&self, predicate: String, value: String) -> Result<(), MpError> {
@@ -156,20 +200,113 @@ impl MemoryPlant {
         self.inner.lock().unwrap().total_facts() as u64
     }
 
-    /// Persist all users under `path` as a **plaintext** JSON tree. For
-    /// privacy-first on-device storage use `saveSealed` instead.
+    /// Persist facts AND documents under `path` as a **plaintext** JSON tree.
+    /// For privacy-first on-device storage use `saveSealed` instead.
     pub fn save(&self, path: String) -> Result<(), MpError> {
-        self.inner.lock().unwrap().save_state(&path).map_err(MpError::from_err)
+        self.inner.lock().unwrap().save_state(&path).map_err(MpError::from_err)?;
+        self.docs.lock().unwrap().save_state(&path).map_err(MpError::from_err)
     }
 
     /// Encrypted-at-rest save (ChaCha20-Poly1305 AEAD): the whole on-disk
-    /// footprint — values, keys, schema and service metadata — is sealed; no
-    /// plaintext touches disk. `key` MUST be exactly 32 bytes; derive/store it
-    /// in the iOS Keychain or Android Keystore. Pairs with `loadOrCreateSealed`.
+    /// footprint — facts (values, keys, schema, service metadata) AND document
+    /// chunks/embeddings — is sealed; no plaintext touches disk. `key` MUST be
+    /// exactly 32 bytes; derive/store it in the iOS Keychain or Android
+    /// Keystore. Pairs with `loadOrCreateSealed`.
     pub fn save_sealed(&self, path: String, key: Vec<u8>) -> Result<(), MpError> {
         let k = key32(&key)?;
-        self.inner.lock().unwrap().save_state_sealed(&path, &k).map_err(MpError::from_err)
+        self.inner.lock().unwrap().save_state_sealed(&path, &k).map_err(MpError::from_err)?;
+        self.docs.lock().unwrap().save_state_sealed(&path, &k).map_err(MpError::from_err)
     }
+
+    // ---- Document RAG (semantic search over chunked files) ----
+
+    /// Index a document whose chunks are ALREADY embedded by the caller (the
+    /// app's embedder / on-device model). Split a big file with the top-level
+    /// `chunkText`, embed each chunk, then call this. `chunks` and `embeddings`
+    /// must be the same length; re-using `docId` replaces it. Returns the
+    /// number of chunks indexed.
+    pub fn add_document(
+        &self,
+        doc_id: String,
+        chunks: Vec<String>,
+        embeddings: Vec<Vec<f32>>,
+        metadata: HashMap<String, String>,
+    ) -> Result<u32, MpError> {
+        if chunks.len() != embeddings.len() {
+            return Err(MpError::Memory {
+                msg: format!(
+                    "chunks ({}) and embeddings ({}) length mismatch",
+                    chunks.len(), embeddings.len()
+                ),
+            });
+        }
+        let meta = str_meta_to_json(metadata);
+        let n = self.docs.lock().unwrap()
+            .add_document_with_embeddings(doc_id, chunks, embeddings, meta);
+        Ok(n as u32)
+    }
+
+    /// Semantic search over a caller-supplied query embedding, with rich
+    /// out-of-box filters (all ANDed): `metadata` exact-match, `containsText`
+    /// case-insensitive substring, `minScore` cosine threshold, `docIds`
+    /// restriction. Empty filters = pure top-k nearest.
+    pub fn search(
+        &self,
+        query_embedding: Vec<f32>,
+        k: u32,
+        metadata: HashMap<String, String>,
+        contains_text: Option<String>,
+        min_score: Option<f32>,
+        doc_ids: Option<Vec<String>>,
+    ) -> Vec<DocHit> {
+        let filter = SearchFilter {
+            metadata: str_meta_to_json(metadata),
+            contains_text,
+            min_score,
+            doc_ids,
+        };
+        self.docs.lock().unwrap()
+            .search(&query_embedding, k as usize, &filter)
+            .into_iter()
+            .map(DocHit::from)
+            .collect()
+    }
+
+    /// Drop a document and all its chunks. Returns true if it existed.
+    pub fn forget_document(&self, doc_id: String) -> bool {
+        self.docs.lock().unwrap().forget_document(&doc_id)
+    }
+
+    /// Number of indexed documents.
+    pub fn n_documents(&self) -> u32 {
+        self.docs.lock().unwrap().n_documents() as u32
+    }
+}
+
+/// Split a large file/text into overlapping word-window chunks (pure Rust, no
+/// model needed). Embed each chunk with your own model, then `addDocument`.
+#[uniffi::export]
+pub fn chunk_text(text: String, chunk_size: u32, chunk_overlap: u32) -> Vec<String> {
+    crate::document::chunk_text(&text, chunk_size as usize, chunk_overlap as usize)
+}
+
+/// Fresh empty document store (placeholder MockEncoder is unused — the FFI
+/// only uses the caller-supplied-embedding path).
+fn new_doc_store() -> DocumentMemory<MockEncoder> {
+    DocumentMemory::new(MockEncoder::new(1))
+}
+
+/// Stringify a JSON metadata value for the FFI boundary.
+fn json_to_string(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Convert `{String: String}` FFI metadata to JSON values for the engine.
+fn str_meta_to_json(m: HashMap<String, String>) -> HashMap<String, serde_json::Value> {
+    m.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))).collect()
 }
 
 /// Validate a caller-supplied key is exactly 32 bytes (ChaCha20-Poly1305).
@@ -243,5 +380,69 @@ mod tests {
 
         // Bad key LENGTH → explicit error.
         assert!(mp2.save_sealed(path, vec![1u8; 16]).is_err());
+    }
+
+    #[test]
+    fn ffi_document_rag_search_and_filters() {
+        let mp = MemoryPlant::new(512, 256, "default".into());
+        // chunkText is the pure-Rust splitter (free function).
+        let chunks = chunk_text("hello world foo bar baz".into(), 3, 1);
+        assert!(!chunks.is_empty());
+
+        let mut meta = HashMap::new();
+        meta.insert("kind".to_string(), "note".to_string());
+        let n = mp.add_document("a".into(),
+            vec!["milk eggs bread".into()], vec![vec![1.0, 0.0, 0.0, 0.0]], meta).unwrap();
+        assert_eq!(n, 1);
+        mp.add_document("b".into(),
+            vec!["audit log".into()], vec![vec![0.0, 1.0, 0.0, 0.0]], HashMap::new()).unwrap();
+        assert_eq!(mp.n_documents(), 2);
+
+        // Nearest to 'a'; metadata surfaced on the hit.
+        let hits = mp.search(vec![0.9, 0.1, 0.0, 0.0], 5, HashMap::new(), None, None, None);
+        assert_eq!(hits[0].doc_id, "a");
+        assert_eq!(hits[0].metadata.get("kind"), Some(&"note".to_string()));
+
+        // metadata filter → only 'a'.
+        let mut f = HashMap::new();
+        f.insert("kind".to_string(), "note".to_string());
+        let hits = mp.search(vec![0.0, 1.0, 0.0, 0.0], 5, f, None, None, None);
+        assert!(hits.iter().all(|h| h.doc_id == "a"));
+
+        // contains_text (case-insensitive) → only 'b'.
+        let hits = mp.search(vec![0.0, 1.0, 0.0, 0.0], 5, HashMap::new(), Some("AUDIT".into()), None, None);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].doc_id, "b");
+
+        // length mismatch is an explicit error.
+        assert!(mp.add_document("x".into(), vec!["one".into(), "two".into()],
+            vec![vec![1.0, 0.0, 0.0, 0.0]], HashMap::new()).is_err());
+
+        assert!(mp.forget_document("a".into()));
+        assert_eq!(mp.n_documents(), 1);
+    }
+
+    #[test]
+    fn ffi_documents_persist_sealed_across_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap().to_string();
+        let key = vec![5u8; 32];
+        {
+            let mp = MemoryPlant::load_or_create_sealed(
+                path.clone(), key.clone(), 512, 256, "default".into()).unwrap();
+            mp.add_document("d".into(), vec!["persisted file chunk".into()],
+                vec![vec![1.0, 0.0, 0.0, 0.0]], HashMap::new()).unwrap();
+            mp.save_sealed(path.clone(), key.clone()).unwrap();
+        }
+        // Documents encrypted at rest — no plaintext dump.
+        assert!(!std::path::Path::new(&path).join("documents.json").exists());
+        assert!(std::path::Path::new(&path).join("documents.json.enc").exists());
+        // Restart → documents restored.
+        let mp2 = MemoryPlant::load_or_create_sealed(
+            path.clone(), key, 512, 256, "default".into()).unwrap();
+        assert_eq!(mp2.n_documents(), 1);
+        let hits = mp2.search(vec![1.0, 0.0, 0.0, 0.0], 1, HashMap::new(), None, None, None);
+        assert_eq!(hits[0].doc_id, "d");
+        assert!(hits[0].text.contains("persisted"));
     }
 }
