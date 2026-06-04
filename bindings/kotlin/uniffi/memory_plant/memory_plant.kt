@@ -648,11 +648,15 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_memory_plant_checksum_method_memoryplant_save(
     ): Short
+    external fun uniffi_memory_plant_checksum_method_memoryplant_save_sealed(
+    ): Short
     external fun uniffi_memory_plant_checksum_method_memoryplant_store_fact(
     ): Short
     external fun uniffi_memory_plant_checksum_method_memoryplant_total_facts(
     ): Short
     external fun uniffi_memory_plant_checksum_constructor_memoryplant_load_or_create(
+    ): Short
+    external fun uniffi_memory_plant_checksum_constructor_memoryplant_load_or_create_sealed(
     ): Short
     external fun uniffi_memory_plant_checksum_constructor_memoryplant_new(
     ): Short
@@ -680,6 +684,8 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_memory_plant_fn_constructor_memoryplant_load_or_create(`path`: RustBuffer.ByValue,`dim`: Int,`vocabCap`: Int,`user`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
+    external fun uniffi_memory_plant_fn_constructor_memoryplant_load_or_create_sealed(`path`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`dim`: Int,`vocabCap`: Int,`user`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
     external fun uniffi_memory_plant_fn_constructor_memoryplant_new(`dim`: Int,`vocabCap`: Int,`user`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     external fun uniffi_memory_plant_fn_method_memoryplant_export_user(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -693,6 +699,8 @@ internal object UniffiLib {
     external fun uniffi_memory_plant_fn_method_memoryplant_recall_fact(`ptr`: Long,`predicate`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_memory_plant_fn_method_memoryplant_save(`ptr`: Long,`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_memory_plant_fn_method_memoryplant_save_sealed(`ptr`: Long,`path`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_memory_plant_fn_method_memoryplant_store_fact(`ptr`: Long,`predicate`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -832,7 +840,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_memory_plant_checksum_method_memoryplant_recall_fact() != 49521.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_memory_plant_checksum_method_memoryplant_save() != 53431.toShort()) {
+    if (lib.uniffi_memory_plant_checksum_method_memoryplant_save() != 39292.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_memory_plant_checksum_method_memoryplant_save_sealed() != 5951.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_memory_plant_checksum_method_memoryplant_store_fact() != 62977.toShort()) {
@@ -842,6 +853,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_memory_plant_checksum_constructor_memoryplant_load_or_create() != 39311.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_memory_plant_checksum_constructor_memoryplant_load_or_create_sealed() != 13083.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_memory_plant_checksum_constructor_memoryplant_new() != 40197.toShort()) {
@@ -1130,6 +1144,25 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
     }
 }
 
+/**
+ * @suppress
+ */
+public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
+    override fun read(buf: ByteBuffer): ByteArray {
+        val len = buf.getInt()
+        val byteArr = ByteArray(len)
+        buf.get(byteArr)
+        return byteArr
+    }
+    override fun allocationSize(value: ByteArray): ULong {
+        return 4UL + value.size.toULong()
+    }
+    override fun write(value: ByteArray, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        buf.put(value)
+    }
+}
+
 
 // This template implements a class for working with a Rust struct via a handle
 // to the live Rust struct on the other side of the FFI.
@@ -1248,10 +1281,18 @@ public interface MemoryPlantInterface {
     fun `recallFact`(`predicate`: kotlin.String): kotlin.String?
     
     /**
-     * Persist all users under `path` (plaintext JSON tree; use the redb/sealed
-     * paths in persistence.rs for encrypted on-device storage).
+     * Persist all users under `path` as a **plaintext** JSON tree. For
+     * privacy-first on-device storage use `saveSealed` instead.
      */
     fun `save`(`path`: kotlin.String)
+    
+    /**
+     * Encrypted-at-rest save (ChaCha20-Poly1305 AEAD): the whole on-disk
+     * footprint — values, keys, schema and service metadata — is sealed; no
+     * plaintext touches disk. `key` MUST be exactly 32 bytes; derive/store it
+     * in the iOS Keychain or Android Keystore. Pairs with `loadOrCreateSealed`.
+     */
+    fun `saveSealed`(`path`: kotlin.String, `key`: kotlin.ByteArray)
     
     fun `storeFact`(`predicate`: kotlin.String, `value`: kotlin.String)
     
@@ -1448,8 +1489,8 @@ open class MemoryPlant: Disposable, AutoCloseable, MemoryPlantInterface
 
     
     /**
-     * Persist all users under `path` (plaintext JSON tree; use the redb/sealed
-     * paths in persistence.rs for encrypted on-device storage).
+     * Persist all users under `path` as a **plaintext** JSON tree. For
+     * privacy-first on-device storage use `saveSealed` instead.
      */
     @Throws(MpException::class)override fun `save`(`path`: kotlin.String)
         = 
@@ -1458,6 +1499,25 @@ open class MemoryPlant: Disposable, AutoCloseable, MemoryPlantInterface
     UniffiLib.uniffi_memory_plant_fn_method_memoryplant_save(
         it,
         FfiConverterString.lower(`path`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Encrypted-at-rest save (ChaCha20-Poly1305 AEAD): the whole on-disk
+     * footprint — values, keys, schema and service metadata — is sealed; no
+     * plaintext touches disk. `key` MUST be exactly 32 bytes; derive/store it
+     * in the iOS Keychain or Android Keystore. Pairs with `loadOrCreateSealed`.
+     */
+    @Throws(MpException::class)override fun `saveSealed`(`path`: kotlin.String, `key`: kotlin.ByteArray)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(MpException) { _status ->
+    UniffiLib.uniffi_memory_plant_fn_method_memoryplant_save_sealed(
+        it,
+        FfiConverterString.lower(`path`),FfiConverterByteArray.lower(`key`),_status)
 }
     }
     
@@ -1516,6 +1576,25 @@ open class MemoryPlant: Disposable, AutoCloseable, MemoryPlantInterface
     UniffiLib.uniffi_memory_plant_fn_constructor_memoryplant_load_or_create(
     
         FfiConverterString.lower(`path`),FfiConverterUInt.lower(`dim`),FfiConverterUInt.lower(`vocabCap`),FfiConverterString.lower(`user`),_status)
+}
+    )
+    }
+    
+
+        
+    /**
+     * Durable + ENCRYPTED engine: decrypt and load the sealed state at `path`
+     * (written by `saveSealed`), or start fresh if none exists there. `key`
+     * MUST be exactly 32 bytes and MUST match the key used to seal — a wrong
+     * key fails AEAD authentication and returns an error (no silent fallback).
+     * This is the recommended constructor for a privacy-first product.
+     */
+    @Throws(MpException::class) fun `loadOrCreateSealed`(`path`: kotlin.String, `key`: kotlin.ByteArray, `dim`: kotlin.UInt, `vocabCap`: kotlin.UInt, `user`: kotlin.String): MemoryPlant {
+            return FfiConverterTypeMemoryPlant.lift(
+    uniffiRustCallWithError(MpException) { _status ->
+    UniffiLib.uniffi_memory_plant_fn_constructor_memoryplant_load_or_create_sealed(
+    
+        FfiConverterString.lower(`path`),FfiConverterByteArray.lower(`key`),FfiConverterUInt.lower(`dim`),FfiConverterUInt.lower(`vocabCap`),FfiConverterString.lower(`user`),_status)
 }
     )
     }

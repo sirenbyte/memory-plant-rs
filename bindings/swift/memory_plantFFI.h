@@ -258,6 +258,11 @@ void uniffi_memory_plant_fn_free_memoryplant(uint64_t handle, RustCallStatus *_N
 uint64_t uniffi_memory_plant_fn_constructor_memoryplant_load_or_create(RustBuffer path, uint32_t dim, uint32_t vocab_cap, RustBuffer user, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_CONSTRUCTOR_MEMORYPLANT_LOAD_OR_CREATE_SEALED
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_CONSTRUCTOR_MEMORYPLANT_LOAD_OR_CREATE_SEALED
+uint64_t uniffi_memory_plant_fn_constructor_memoryplant_load_or_create_sealed(RustBuffer path, RustBuffer key, uint32_t dim, uint32_t vocab_cap, RustBuffer user, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_CONSTRUCTOR_MEMORYPLANT_NEW
 #define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_CONSTRUCTOR_MEMORYPLANT_NEW
 uint64_t uniffi_memory_plant_fn_constructor_memoryplant_new(uint32_t dim, uint32_t vocab_cap, RustBuffer user, RustCallStatus *_Nonnull out_status
@@ -291,6 +296,11 @@ RustBuffer uniffi_memory_plant_fn_method_memoryplant_recall_fact(uint64_t ptr, R
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_SAVE
 #define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_SAVE
 void uniffi_memory_plant_fn_method_memoryplant_save(uint64_t ptr, RustBuffer path, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_SAVE_SEALED
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_SAVE_SEALED
+void uniffi_memory_plant_fn_method_memoryplant_save_sealed(uint64_t ptr, RustBuffer path, RustBuffer key, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_METHOD_MEMORYPLANT_STORE_FACT
@@ -599,6 +609,12 @@ uint16_t uniffi_memory_plant_checksum_method_memoryplant_save(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_SAVE_SEALED
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_SAVE_SEALED
+uint16_t uniffi_memory_plant_checksum_method_memoryplant_save_sealed(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_STORE_FACT
 #define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_STORE_FACT
 uint16_t uniffi_memory_plant_checksum_method_memoryplant_store_fact(void
@@ -614,6 +630,12 @@ uint16_t uniffi_memory_plant_checksum_method_memoryplant_total_facts(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_CONSTRUCTOR_MEMORYPLANT_LOAD_OR_CREATE
 #define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_CONSTRUCTOR_MEMORYPLANT_LOAD_OR_CREATE
 uint16_t uniffi_memory_plant_checksum_constructor_memoryplant_load_or_create(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_CONSTRUCTOR_MEMORYPLANT_LOAD_OR_CREATE_SEALED
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_CONSTRUCTOR_MEMORYPLANT_LOAD_OR_CREATE_SEALED
+uint16_t uniffi_memory_plant_checksum_constructor_memoryplant_load_or_create_sealed(void
     
 );
 #endif

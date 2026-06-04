@@ -71,6 +71,7 @@ Engine is now callable from Swift/Kotlin. See [`bindings/README.md`](bindings/RE
 - `src/bin/uniffi-bindgen.rs` + `setup_scaffolding!()`; `[lib] crate-type=["lib","cdylib","staticlib"]`; `uniffi 0.31 (cli)`.
 - **Swift** `bindings/swift/memory_plant.swift` (+FFI.h/.modulemap) — `open class MemoryPlant: …Sendable`, `recallFact -> String?`, `throws` from `MpError`. **Kotlin** `bindings/kotlin/.../memory_plant.kt` — `class MemoryPlant: Disposable, AutoCloseable`.
 - iOS **device + simulator** static libs cross-build (`aarch64-apple-ios`, `-sim`); assembled `MemoryPlant.xcframework` (both slices) via `xcodebuild -create-xcframework`. Key fix: `DEVELOPER_DIR=/Applications/Xcode.app` (CommandLineTools has no iPhoneOS SDK) + build `staticlib` not `cdylib`.
+- **Durable persistence** (`load_or_create` ctor) + **encrypted-at-rest** (`save_sealed`/`load_or_create_sealed`, 32-byte ChaCha20-Poly1305 key). Sealed seals the WHOLE footprint (values+keys+schema+service meta; audit not persisted) — new `MemoryService`/`PersonalMemory` `save_state_sealed`/`load_state_sealed` over the existing `AdaptiveMemory` AEAD. Tests `ffi_persistence_survives_restart` + `ffi_sealed_persistence_roundtrip` (right key restores / wrong key fails AEAD / bad length errors / no plaintext on disk). FFI surface is facts-only (no docs/semantics by design).
 
 ### ⏳ REMAINING in P3 (smaller than thought)
 - **Android `.so`**: NDK not installed on host → `rustup target add` android ABIs + `cargo-ndk build` (recipe in bindings/README.md). No code change — same `ffi.rs`.

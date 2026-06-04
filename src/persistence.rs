@@ -289,6 +289,53 @@ impl PersonalMemory {
             schema: snap.schema,
         })
     }
+
+    /// Encrypted-at-rest save: seals BOTH the adaptive bank (`adaptive.json.enc`)
+    /// and the personal snapshot — user_id + schema (`personal.json.enc`) — with
+    /// ChaCha20-Poly1305. No plaintext is written.
+    pub fn save_state_sealed(
+        &self,
+        path: impl AsRef<Path>,
+        key: &[u8; 32],
+    ) -> Result<(), PersistError> {
+        let path = path.as_ref();
+        fs::create_dir_all(path)?;
+        self.mp.save_state_sealed(path, key)?;
+        let snap = PersonalSnapshot {
+            schema_version: SCHEMA_VERSION,
+            user_id: self.user_id.clone(),
+            schema: self.schema.clone(),
+        };
+        let sealed = crate::crypto::seal(&serde_json::to_vec(&snap)?, key);
+        fs::write(path.join("personal.json.enc"), sealed)?;
+        Ok(())
+    }
+
+    /// Restore from a directory written by `save_state_sealed`.
+    pub fn load_state_sealed(
+        path: impl AsRef<Path>,
+        key: &[u8; 32],
+        extractor: Arc<dyn Extractor>,
+    ) -> Result<Self, PersistError> {
+        let path = path.as_ref();
+        let sealed = fs::read(path.join("personal.json.enc"))?;
+        let raw = crate::crypto::open(&sealed, key)
+            .map_err(|e| PersistError::Corrupt(e.to_string()))?;
+        let snap: PersonalSnapshot = serde_json::from_slice(&raw)?;
+        if snap.schema_version != SCHEMA_VERSION {
+            return Err(PersistError::Corrupt(format!(
+                "personal schema {} != {}",
+                snap.schema_version, SCHEMA_VERSION
+            )));
+        }
+        let mp = AdaptiveMemory::load_state_sealed(path, key)?;
+        Ok(PersonalMemory {
+            user_id: snap.user_id,
+            mp,
+            extractor,
+            schema: snap.schema,
+        })
+    }
 }
 
 // ============================================================

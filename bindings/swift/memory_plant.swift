@@ -513,6 +513,24 @@ fileprivate struct FfiConverterString: FfiConverter {
     }
 }
 
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterData: FfiConverterRustBuffer {
+    typealias SwiftType = Data
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Data {
+        let len: Int32 = try readInt(&buf)
+        return Data(try readBytes(&buf, count: Int(len)))
+    }
+
+    public static func write(_ value: Data, into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        writeBytes(&buf, value)
+    }
+}
+
 
 
 
@@ -538,10 +556,18 @@ public protocol MemoryPlantProtocol: AnyObject, Sendable {
     func recallFact(predicate: String) throws  -> String?
     
     /**
-     * Persist all users under `path` (plaintext JSON tree; use the redb/sealed
-     * paths in persistence.rs for encrypted on-device storage).
+     * Persist all users under `path` as a **plaintext** JSON tree. For
+     * privacy-first on-device storage use `saveSealed` instead.
      */
     func save(path: String) throws 
+    
+    /**
+     * Encrypted-at-rest save (ChaCha20-Poly1305 AEAD): the whole on-disk
+     * footprint — values, keys, schema and service metadata — is sealed; no
+     * plaintext touches disk. `key` MUST be exactly 32 bytes; derive/store it
+     * in the iOS Keychain or Android Keystore. Pairs with `loadOrCreateSealed`.
+     */
+    func saveSealed(path: String, key: Data) throws 
     
     func storeFact(predicate: String, value: String) throws 
     
@@ -640,6 +666,25 @@ public static func loadOrCreate(path: String, dim: UInt32, vocabCap: UInt32, use
 })
 }
     
+    /**
+     * Durable + ENCRYPTED engine: decrypt and load the sealed state at `path`
+     * (written by `saveSealed`), or start fresh if none exists there. `key`
+     * MUST be exactly 32 bytes and MUST match the key used to seal — a wrong
+     * key fails AEAD authentication and returns an error (no silent fallback).
+     * This is the recommended constructor for a privacy-first product.
+     */
+public static func loadOrCreateSealed(path: String, key: Data, dim: UInt32, vocabCap: UInt32, user: String)throws  -> MemoryPlant  {
+    return try  FfiConverterTypeMemoryPlant_lift(try rustCallWithError(FfiConverterTypeMpError_lift) {
+    uniffi_memory_plant_fn_constructor_memoryplant_load_or_create_sealed(
+        FfiConverterString.lower(path),
+        FfiConverterData.lower(key),
+        FfiConverterUInt32.lower(dim),
+        FfiConverterUInt32.lower(vocabCap),
+        FfiConverterString.lower(user),$0
+    )
+})
+}
+    
 
     
     /**
@@ -692,13 +737,28 @@ open func recallFact(predicate: String)throws  -> String?  {
 }
     
     /**
-     * Persist all users under `path` (plaintext JSON tree; use the redb/sealed
-     * paths in persistence.rs for encrypted on-device storage).
+     * Persist all users under `path` as a **plaintext** JSON tree. For
+     * privacy-first on-device storage use `saveSealed` instead.
      */
 open func save(path: String)throws   {try rustCallWithError(FfiConverterTypeMpError_lift) {
     uniffi_memory_plant_fn_method_memoryplant_save(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(path),$0
+    )
+}
+}
+    
+    /**
+     * Encrypted-at-rest save (ChaCha20-Poly1305 AEAD): the whole on-disk
+     * footprint — values, keys, schema and service metadata — is sealed; no
+     * plaintext touches disk. `key` MUST be exactly 32 bytes; derive/store it
+     * in the iOS Keychain or Android Keystore. Pairs with `loadOrCreateSealed`.
+     */
+open func saveSealed(path: String, key: Data)throws   {try rustCallWithError(FfiConverterTypeMpError_lift) {
+    uniffi_memory_plant_fn_method_memoryplant_save_sealed(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(path),
+        FfiConverterData.lower(key),$0
     )
 }
 }
@@ -1008,7 +1068,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_memory_plant_checksum_method_memoryplant_recall_fact() != 49521) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_memory_plant_checksum_method_memoryplant_save() != 53431) {
+    if (uniffi_memory_plant_checksum_method_memoryplant_save() != 39292) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_memory_plant_checksum_method_memoryplant_save_sealed() != 5951) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_memory_plant_checksum_method_memoryplant_store_fact() != 62977) {
@@ -1018,6 +1081,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_memory_plant_checksum_constructor_memoryplant_load_or_create() != 39311) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_memory_plant_checksum_constructor_memoryplant_load_or_create_sealed() != 13083) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_memory_plant_checksum_constructor_memoryplant_new() != 40197) {

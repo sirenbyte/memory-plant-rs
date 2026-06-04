@@ -28,9 +28,17 @@ state is lost on process exit. For durable memory that survives an app restart,
 construct with `loadOrCreate(path:…)` and call `save(path)` on suspend/exit:
 `loadOrCreate(path) → store/ingest/forget → save(path)` round-trips through disk.
 (The factory is named `loadOrCreate`, not `open`, because `open` is a reserved
-keyword in both Swift and Kotlin.) Today `save` writes a plaintext JSON tree;
-encrypted-at-rest (`crypto.rs` AEAD / redb) is wired in the engine and is the
-next step to expose through the FFI.
+keyword in both Swift and Kotlin.)
+
+**Encrypted-at-rest (privacy-first — recommended).** `save` writes a *plaintext*
+JSON tree. For a privacy-first product use the **sealed** pair instead:
+`loadOrCreateSealed(path, key, …)` + `saveSealed(path, key)`. The entire on-disk
+footprint — values, keys, schema **and** service metadata — is encrypted with
+**ChaCha20-Poly1305 AEAD**; no plaintext touches disk, and the audit trail is not
+persisted in sealed mode (no side-channel). The `key` is exactly **32 bytes** and
+must match across save/load — a wrong key fails AEAD authentication (no silent
+fallback). Derive/store it in the **iOS Keychain** / **Android Keystore**; never
+hardcode it. (Don't mix `save` and `saveSealed` at the same `path` — pick one.)
 
 Heavy/optional surfaces (fastembed/ORT embeddings, ANN index, the LLM
 extractors, document semantic-search) are **intentionally not** in the FFI — the
@@ -106,11 +114,13 @@ Drag `MemoryPlant.xcframework` into your target, add `bindings/swift/memory_plan
 ```swift
 import Foundation
 
-// Durable: survives app restart. Point at the app's Application Support dir.
 let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
              .appendingPathComponent("memory").path
-let mp = try MemoryPlant.loadOrCreate(path: dir, dim: 512, vocabCap: 4096, user: "default")
+let key: Data = loadOrCreateKeychainKey()                   // 32 bytes from Keychain
 
+// Encrypted-at-rest (recommended). Survives restart; nothing plaintext on disk.
+let mp = try MemoryPlant.loadOrCreateSealed(path: dir, key: key,
+                                            dim: 512, vocabCap: 4096, user: "default")
 try mp.storeFact(predicate: "works_as", value: "engineer")
 let job = try mp.recallFact(predicate: "works_as")          // "engineer"
 
@@ -118,8 +128,10 @@ let facts = try mp.ingestMessage(message: "I live in Almaty and prefer Rust")
 for f in facts { print(f.predicate, f.obj) }
 
 try mp.forgetFact(predicate: "works_as")                    // GDPR erase
-try mp.save(path: dir)                                      // persist on suspend/exit
+try mp.saveSealed(path: dir, key: key)                      // persist on suspend/exit
 print(mp.totalFacts())
+
+// Plaintext alternative (no key): MemoryPlant.loadOrCreate(path:…) + mp.save(path:)
 ```
 
 ## Android usage (Kotlin)
@@ -131,15 +143,19 @@ Add `bindings/kotlin/uniffi/memory_plant/memory_plant.kt` + the JNA dependency
 ```kotlin
 import uniffi.memory_plant.MemoryPlant
 
-// Durable: survives app restart. Use the app's filesDir.
 val dir = "${context.filesDir}/memory"
-val mp = MemoryPlant.loadOrCreate(dir, 512u, 4096u, "default")
+val key: ByteArray = loadOrCreateKeystoreKey()               // 32 bytes from Keystore
+
+// Encrypted-at-rest (recommended). Survives restart; nothing plaintext on disk.
+val mp = MemoryPlant.loadOrCreateSealed(dir, key, 512u, 4096u, "default")
 mp.storeFact("works_as", "engineer")
 val job = mp.recallFact("works_as")                          // "engineer"
 val facts = mp.ingestMessage("I live in Almaty and prefer Rust")
 mp.forgetFact("works_as")
-mp.save(dir)                                                 // persist on onStop()
+mp.saveSealed(dir, key)                                      // persist on onStop()
 mp.close()                                                   // Disposable
+
+// Plaintext alternative (no key): MemoryPlant.loadOrCreate(dir, …) + mp.save(dir)
 ```
 
 ### Android `.so` — remaining work

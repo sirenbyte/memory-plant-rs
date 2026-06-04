@@ -149,6 +149,74 @@ impl MemoryService {
         }
         Ok(svc)
     }
+
+    /// Encrypted-at-rest save of every user (ChaCha20-Poly1305 AEAD). Seals
+    /// each user's bank + schema AND the service metadata; **no plaintext**
+    /// is written. The audit trail is intentionally not persisted in sealed
+    /// mode (avoids a plaintext side-channel). `key` must be 32 bytes — derive
+    /// it from the OS keychain (iOS) / Keystore (Android).
+    pub fn save_state_sealed(
+        &self,
+        path: impl AsRef<Path>,
+        key: &[u8; 32],
+    ) -> Result<(), PersistError> {
+        let path = path.as_ref();
+        std::fs::create_dir_all(path)?;
+        let users_dir = path.join("users");
+        std::fs::create_dir_all(&users_dir)?;
+        for (uid, pm) in &self.users {
+            pm.save_state_sealed(users_dir.join(safe_id(uid)), key)?;
+        }
+        let meta = serde_json::json!({
+            "dim": self.dim,
+            "vocab_cap": self.vocab_cap,
+            "vocab_seed": self.vocab_seed,
+            "user_ids": self.user_ids(),
+        });
+        let sealed = crate::crypto::seal(&serde_json::to_vec(&meta)?, key);
+        std::fs::write(path.join("service.json.enc"), sealed)?;
+        Ok(())
+    }
+
+    /// Restore from a tree written by `save_state_sealed`. The same `key` is
+    /// required — a wrong key fails AEAD authentication (returns Corrupt).
+    pub fn load_state_sealed<F>(
+        path: impl AsRef<Path>,
+        key: &[u8; 32],
+        extractor_factory: F,
+    ) -> Result<Self, PersistError>
+    where
+        F: Fn() -> Arc<dyn Extractor> + Send + Sync + 'static,
+    {
+        let path = path.as_ref();
+        let sealed = std::fs::read(path.join("service.json.enc"))?;
+        let raw = crate::crypto::open(&sealed, key)
+            .map_err(|e| PersistError::Corrupt(e.to_string()))?;
+        let meta: serde_json::Value = serde_json::from_slice(&raw)?;
+        let dim = meta["dim"].as_u64().ok_or_else(|| {
+            PersistError::Corrupt("missing dim".into())
+        })? as usize;
+        let vocab_cap = meta["vocab_cap"].as_u64().ok_or_else(|| {
+            PersistError::Corrupt("missing vocab_cap".into())
+        })? as usize;
+        let user_ids: Vec<String> = meta["user_ids"]
+            .as_array()
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+
+        let mut svc = MemoryService::new(extractor_factory, dim, vocab_cap);
+        let users_dir = path.join("users");
+        for uid in user_ids {
+            let user_dir = users_dir.join(safe_id(&uid));
+            if !user_dir.join("personal.json.enc").exists() {
+                continue;
+            }
+            let pm = PersonalMemory::load_state_sealed(&user_dir, key, (svc.extractor_factory)())?;
+            svc.users.insert(uid.clone(), pm);
+            svc.audits.insert(uid, AuditTrail::default());
+        }
+        Ok(svc)
+    }
 }
 
 fn safe_id(uid: &str) -> String {

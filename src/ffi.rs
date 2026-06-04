@@ -90,6 +90,30 @@ impl MemoryPlant {
         Ok(Arc::new(Self { inner: Mutex::new(svc), user }))
     }
 
+    /// Durable + ENCRYPTED engine: decrypt and load the sealed state at `path`
+    /// (written by `saveSealed`), or start fresh if none exists there. `key`
+    /// MUST be exactly 32 bytes and MUST match the key used to seal — a wrong
+    /// key fails AEAD authentication and returns an error (no silent fallback).
+    /// This is the recommended constructor for a privacy-first product.
+    #[uniffi::constructor]
+    pub fn load_or_create_sealed(
+        path: String,
+        key: Vec<u8>,
+        dim: u32,
+        vocab_cap: u32,
+        user: String,
+    ) -> Result<Arc<Self>, MpError> {
+        let k = key32(&key)?;
+        let factory = || -> Arc<dyn Extractor> { Arc::new(RegexExtractor::new()) };
+        let has_state = std::path::Path::new(&path).join("service.json.enc").exists();
+        let svc = if has_state {
+            MemoryService::load_state_sealed(&path, &k, factory).map_err(MpError::from_err)?
+        } else {
+            MemoryService::new(factory, dim as usize, vocab_cap as usize)
+        };
+        Ok(Arc::new(Self { inner: Mutex::new(svc), user }))
+    }
+
     pub fn store_fact(&self, predicate: String, value: String) -> Result<(), MpError> {
         let mut svc = self.inner.lock().unwrap();
         let pm = svc.user(&self.user).map_err(MpError::from_err)?;
@@ -132,11 +156,27 @@ impl MemoryPlant {
         self.inner.lock().unwrap().total_facts() as u64
     }
 
-    /// Persist all users under `path` (plaintext JSON tree; use the redb/sealed
-    /// paths in persistence.rs for encrypted on-device storage).
+    /// Persist all users under `path` as a **plaintext** JSON tree. For
+    /// privacy-first on-device storage use `saveSealed` instead.
     pub fn save(&self, path: String) -> Result<(), MpError> {
         self.inner.lock().unwrap().save_state(&path).map_err(MpError::from_err)
     }
+
+    /// Encrypted-at-rest save (ChaCha20-Poly1305 AEAD): the whole on-disk
+    /// footprint — values, keys, schema and service metadata — is sealed; no
+    /// plaintext touches disk. `key` MUST be exactly 32 bytes; derive/store it
+    /// in the iOS Keychain or Android Keystore. Pairs with `loadOrCreateSealed`.
+    pub fn save_sealed(&self, path: String, key: Vec<u8>) -> Result<(), MpError> {
+        let k = key32(&key)?;
+        self.inner.lock().unwrap().save_state_sealed(&path, &k).map_err(MpError::from_err)
+    }
+}
+
+/// Validate a caller-supplied key is exactly 32 bytes (ChaCha20-Poly1305).
+fn key32(key: &[u8]) -> Result<[u8; 32], MpError> {
+    <[u8; 32]>::try_from(key).map_err(|_| MpError::Memory {
+        msg: format!("key must be exactly 32 bytes, got {}", key.len()),
+    })
 }
 
 #[cfg(test)]
@@ -171,5 +211,37 @@ mod tests {
         mp2.save(path.clone()).unwrap();
         let mp3 = MemoryPlant::load_or_create(path, 512, 256, "default".into()).unwrap();
         assert_eq!(mp3.recall_fact("lives_in".into()).unwrap(), None);
+    }
+
+    #[test]
+    fn ffi_sealed_persistence_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap().to_string();
+        let key = vec![7u8; 32];
+        // Session 1: open sealed-fresh, store a secret, save sealed.
+        {
+            let mp = MemoryPlant::load_or_create_sealed(
+                path.clone(), key.clone(), 512, 256, "default".into()).unwrap();
+            mp.store_fact("secret".into(), "value42".into()).unwrap();
+            mp.save_sealed(path.clone(), key.clone()).unwrap();
+        }
+        // No plaintext on disk — only the sealed files exist.
+        let p = std::path::Path::new(&path);
+        assert!(!p.join("service.json").exists(), "plaintext service.json must NOT exist");
+        assert!(p.join("service.json.enc").exists(), "sealed service.json.enc must exist");
+        assert!(!p.join("users/default/adaptive.json").exists(), "plaintext adaptive must NOT exist");
+
+        // Session 2 (restart) with the RIGHT key → secret restored.
+        let mp2 = MemoryPlant::load_or_create_sealed(
+            path.clone(), key.clone(), 512, 256, "default".into()).unwrap();
+        assert_eq!(mp2.recall_fact("secret".into()).unwrap(), Some("value42".into()));
+
+        // WRONG key → AEAD auth fails (no silent fallback).
+        let wrong = vec![9u8; 32];
+        assert!(MemoryPlant::load_or_create_sealed(
+            path.clone(), wrong, 512, 256, "default".into()).is_err());
+
+        // Bad key LENGTH → explicit error.
+        assert!(mp2.save_sealed(path, vec![1u8; 16]).is_err());
     }
 }
