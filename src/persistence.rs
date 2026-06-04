@@ -30,7 +30,7 @@ use crate::audit::{AuditEvent, AuditTrail};
 use crate::extractor::Extractor;
 use crate::hlb::HlbError;
 use crate::personal::PersonalMemory;
-use redb::{ReadableTable, TableDefinition};
+use redb::TableDefinition;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;

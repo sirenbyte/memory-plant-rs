@@ -45,6 +45,8 @@ chacha20poly1305 = "0.10"
 redb = "2"
 # Pure-Rust HNSW ANN index (optional, feature `ann`). No C/C++ deps, wasm-clean.
 instant-distance = { version = "0.6", optional = true }
+# UniFFI: Swift (iOS) + Kotlin (Android) bindings from the Rust core, proc-macro mode.
+uniffi = { version = "0.31", features = ["cli"] }
 # Regex extractor (default offline fact extraction).
 regex = "1.11"
 # Lightweight blocking HTTP client for LLM-extractor backends. Pure
@@ -71,6 +73,8 @@ tempfile = "3"
 [lib]
 name = "memory_plant"
 path = "src/lib.rs"
+# rlib for the bin + tests; cdylib for Android JNI; staticlib for iOS xcframework.
+crate-type = ["lib", "cdylib", "staticlib"]
 
 [[bin]]
 name = "mp-mcp-server-rs"

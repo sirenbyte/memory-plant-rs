@@ -1,0 +1,7 @@
+module memory_plantFFI {
+    header "memory_plantFFI.h"
+    export *
+    use "Darwin"
+    use "_Builtin_stdbool"
+    use "_Builtin_stdint"
+}

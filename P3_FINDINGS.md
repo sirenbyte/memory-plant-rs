@@ -65,8 +65,17 @@ Decision: **Rust-only** product (no Python in product; mass-market users start e
 5. `067bb92` opt-in ANN fast-path in `DocumentMemory` (no-filter only; default + filtered stay exact; index derived from chunks).
 Tests: 103 default / 104 `--features ann` / +2 `--features fastembed` (e5), 0 failed.
 
-### ⏳ REMAINING in P3 = UniFFI iOS/Android packaging (multi-week)
-Needs iOS/Android toolchains + mobile ORT build + on-device testing — not a single-file change. Spec in §P3.3 above. This is the long pole; the rest of the Rust engine is feature-complete + tested on the host.
+### ✅ DELIVERED (2026-06-04): UniFFI iOS/Android packaging — host + iOS green
+Engine is now callable from Swift/Kotlin. See [`bindings/README.md`](bindings/README.md).
+- `src/ffi.rs` — `MemoryPlant` `#[uniffi::Object]` (Mutex<MemoryService>): store/recall/ingest/forget/exportUser/forgetUser/totalFacts/save; `FactDto` Record, `MpError` Error. `ffi::tests::ffi_store_recall_forget` ✅. Heavy/optional surfaces (fastembed/ORT, ANN, LLM extractors, doc search) deliberately excluded → light, ORT-free mobile binding.
+- `src/bin/uniffi-bindgen.rs` + `setup_scaffolding!()`; `[lib] crate-type=["lib","cdylib","staticlib"]`; `uniffi 0.31 (cli)`.
+- **Swift** `bindings/swift/memory_plant.swift` (+FFI.h/.modulemap) — `open class MemoryPlant: …Sendable`, `recallFact -> String?`, `throws` from `MpError`. **Kotlin** `bindings/kotlin/.../memory_plant.kt` — `class MemoryPlant: Disposable, AutoCloseable`.
+- iOS **device + simulator** static libs cross-build (`aarch64-apple-ios`, `-sim`); assembled `MemoryPlant.xcframework` (both slices) via `xcodebuild -create-xcframework`. Key fix: `DEVELOPER_DIR=/Applications/Xcode.app` (CommandLineTools has no iPhoneOS SDK) + build `staticlib` not `cdylib`.
+
+### ⏳ REMAINING in P3 (smaller than thought)
+- **Android `.so`**: NDK not installed on host → `rustup target add` android ABIs + `cargo-ndk build` (recipe in bindings/README.md). No code change — same `ffi.rs`.
+- **On-device runtime test**: needs an Xcode/Android-Studio harness project (drag in xcframework / jniLibs, smoke-call store/recall).
+- **Mobile ORT** (only if on-device e5 embeddings are wanted): iOS/Android ONNX Runtime from source — the genuine long pole; not needed for the regex-extractor FFI surface above.
 
 ## Prioritized order (Rust-only, ru/en priority)
 1. **🔴 HLB parity fix** (persist Python roles/vocab → load in Rust + division-unbind) + maturin PyO3 parity test. *Blocks provable-forget + P4.*

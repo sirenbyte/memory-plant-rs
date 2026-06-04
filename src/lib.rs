@@ -52,6 +52,10 @@ pub mod audit;
 pub mod persistence;
 pub mod crypto;
 pub mod index;
+pub mod ffi;
+
+// UniFFI proc-macro scaffolding (Swift/Kotlin bindings). Namespace = crate name.
+uniffi::setup_scaffolding!();
 pub mod anthropic;
 pub mod openai;
 pub mod document;
