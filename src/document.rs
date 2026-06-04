@@ -261,6 +261,9 @@ pub struct DocumentMemory<E: Encoder> {
     chunks: Vec<Chunk>,
     chunk_size: usize,
     chunk_overlap: usize,
+    /// Optional ANN index (derived from `chunks`). Used only for no-filter
+    /// queries; None = exact brute-force scan (the default).
+    ann: Option<Box<dyn crate::index::VectorIndex>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -279,6 +282,7 @@ impl<E: Encoder> DocumentMemory<E> {
             chunks: Vec::new(),
             chunk_size: 200,
             chunk_overlap: 20,
+            ann: None,
         }
     }
 
@@ -286,6 +290,29 @@ impl<E: Encoder> DocumentMemory<E> {
         self.chunk_size = size;
         self.chunk_overlap = overlap.min(size.saturating_sub(1));
         self
+    }
+
+    /// Enable an opt-in ANN index (e.g. `HnswIndex` for large corpora) used for
+    /// NO-FILTER queries; filtered queries always use the exact scan. The index
+    /// is derived from `chunks` (rebuilt on add/forget) so it can't desync.
+    pub fn with_ann(mut self, index: Box<dyn crate::index::VectorIndex>) -> Self {
+        self.ann = Some(index);
+        self.rebuild_ann();
+        self
+    }
+
+    /// Rebuild the ANN index from the current chunks (no-op if disabled).
+    fn rebuild_ann(&mut self) {
+        if self.ann.is_none() {
+            return;
+        }
+        let items: Vec<(u64, Vec<f32>)> = self
+            .chunks
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (i as u64, c.embedding.clone()))
+            .collect();
+        self.ann.as_mut().unwrap().rebuild(items);
     }
 
     pub fn n_documents(&self) -> usize { self.documents.len() }
@@ -329,6 +356,7 @@ impl<E: Encoder> DocumentMemory<E> {
                 added_ts: now(),
             },
         );
+        self.rebuild_ann();
         n
     }
 
@@ -338,7 +366,9 @@ impl<E: Encoder> DocumentMemory<E> {
         let before = self.chunks.len();
         self.chunks.retain(|c| c.doc_id != doc_id);
         self.documents.remove(doc_id);
-        self.chunks.len() != before
+        let changed = self.chunks.len() != before;
+        self.rebuild_ann(); // positions shifted → rebuild derived index
+        changed
     }
 
     /// Top-k cosine-similar chunks. Optional `filter` runs on each
@@ -360,6 +390,24 @@ impl<E: Encoder> DocumentMemory<E> {
             return Vec::new();
         }
         let q = &q_emb[0];
+        // ANN fast-path: enabled index + no metadata filter (the index is
+        // filter-blind; filtered queries fall through to the exact scan below).
+        if filter.is_none() {
+            if let Some(idx) = &self.ann {
+                return idx
+                    .search(q, k)
+                    .into_iter()
+                    .filter_map(|(pos, score)| {
+                        self.chunks.get(pos as usize).map(|c| SearchHit {
+                            chunk_id: c.id.clone(),
+                            doc_id: c.doc_id.clone(),
+                            score,
+                            text: c.text(),
+                        })
+                    })
+                    .collect();
+            }
+        }
         let q_view = ArrayView1::from(q.as_slice());
 
         let mut scored: Vec<(f32, &Chunk)> = self
@@ -603,6 +651,25 @@ mod tests {
         let dm = make();
         let hits = dm.semantic_search::<fn(&DocumentEntry) -> bool>("anything", 5, None);
         assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn ann_fast_path_matches_exact_no_filter() {
+        use crate::index::BruteForceIndex;
+        let mut exact = make();
+        exact.add_document("a", "alpha bravo charlie delta", HashMap::new());
+        exact.add_document("b", "xi omicron pi rho", HashMap::new());
+        let mut base = make();
+        base.add_document("a", "alpha bravo charlie delta", HashMap::new());
+        base.add_document("b", "xi omicron pi rho", HashMap::new());
+        let ann = base.with_ann(Box::new(BruteForceIndex::new()));
+
+        let q = "alpha bravo charlie delta";
+        let he = exact.semantic_search::<fn(&DocumentEntry) -> bool>(q, 5, None);
+        let ha = ann.semantic_search::<fn(&DocumentEntry) -> bool>(q, 5, None);
+        assert!(!he.is_empty() && !ha.is_empty());
+        // ANN path (exact BruteForceIndex) must match the inline exact top hit.
+        assert_eq!(ha[0].chunk_id, he[0].chunk_id, "ANN top must match exact (no filter)");
     }
 }
 
