@@ -652,6 +652,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_memory_plant_checksum_method_memoryplant_total_facts(
     ): Short
+    external fun uniffi_memory_plant_checksum_constructor_memoryplant_load_or_create(
+    ): Short
     external fun uniffi_memory_plant_checksum_constructor_memoryplant_new(
     ): Short
     external fun ffi_memory_plant_uniffi_contract_version(
@@ -676,6 +678,8 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_memory_plant_fn_free_memoryplant(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_memory_plant_fn_constructor_memoryplant_load_or_create(`path`: RustBuffer.ByValue,`dim`: Int,`vocabCap`: Int,`user`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
     external fun uniffi_memory_plant_fn_constructor_memoryplant_new(`dim`: Int,`vocabCap`: Int,`user`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     external fun uniffi_memory_plant_fn_method_memoryplant_export_user(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -837,7 +841,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_memory_plant_checksum_method_memoryplant_total_facts() != 981.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_memory_plant_checksum_constructor_memoryplant_new() != 45760.toShort()) {
+    if (lib.uniffi_memory_plant_checksum_constructor_memoryplant_load_or_create() != 39311.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_memory_plant_checksum_constructor_memoryplant_new() != 40197.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -1281,7 +1288,8 @@ open class MemoryPlant: Disposable, AutoCloseable, MemoryPlantInterface
         this.cleanable = null
     }
     /**
-     * New in-memory engine. Sane defaults: dim 512, vocab_cap 4096.
+     * New, EMPTY in-memory engine (never touches disk). Use `open` for a
+     * durable engine. Sane defaults: dim 512, vocab_cap 4096.
      */
     constructor(`dim`: kotlin.UInt, `vocabCap`: kotlin.UInt, `user`: kotlin.String) :
         this(UniffiWithHandle, 
@@ -1487,11 +1495,34 @@ open class MemoryPlant: Disposable, AutoCloseable, MemoryPlantInterface
 
 
     
-    
+    companion object {
+        
     /**
-     * @suppress
+     * Open a DURABLE engine: load the state previously written by `save` at
+     * `path`, or start fresh there if none exists yet (load-or-create). This
+     * closes the cross-session round-trip — `loadOrCreate(path) → … → save(path)`
+     * survives a process restart, so on-device memory is persistent.
+     *
+     * (Named `load_or_create`, not `open`, because `open` is a reserved
+     * keyword in both Swift and Kotlin and would force backtick-escaping at
+     * every call site.)
+     *
+     * When existing state is found, its persisted `dim`/`vocab_cap` win and
+     * the args here are ignored; they apply only to a fresh create.
      */
-    companion object
+    @Throws(MpException::class) fun `loadOrCreate`(`path`: kotlin.String, `dim`: kotlin.UInt, `vocabCap`: kotlin.UInt, `user`: kotlin.String): MemoryPlant {
+            return FfiConverterTypeMemoryPlant.lift(
+    uniffiRustCallWithError(MpException) { _status ->
+    UniffiLib.uniffi_memory_plant_fn_constructor_memoryplant_load_or_create(
+    
+        FfiConverterString.lower(`path`),FfiConverterUInt.lower(`dim`),FfiConverterUInt.lower(`vocabCap`),FfiConverterString.lower(`user`),_status)
+}
+    )
+    }
+    
+
+        
+    }
     
 }
 

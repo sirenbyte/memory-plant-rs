@@ -591,7 +591,8 @@ open class MemoryPlant: MemoryPlantProtocol, @unchecked Sendable {
         return try! rustCall { uniffi_memory_plant_fn_clone_memoryplant(self.handle, $0) }
     }
     /**
-     * New in-memory engine. Sane defaults: dim 512, vocab_cap 4096.
+     * New, EMPTY in-memory engine (never touches disk). Use `open` for a
+     * durable engine. Sane defaults: dim 512, vocab_cap 4096.
      */
 public convenience init(dim: UInt32, vocabCap: UInt32, user: String) {
     let handle =
@@ -614,6 +615,30 @@ public convenience init(dim: UInt32, vocabCap: UInt32, user: String) {
         try! rustCall { uniffi_memory_plant_fn_free_memoryplant(handle, $0) }
     }
 
+    
+    /**
+     * Open a DURABLE engine: load the state previously written by `save` at
+     * `path`, or start fresh there if none exists yet (load-or-create). This
+     * closes the cross-session round-trip — `loadOrCreate(path) → … → save(path)`
+     * survives a process restart, so on-device memory is persistent.
+     *
+     * (Named `load_or_create`, not `open`, because `open` is a reserved
+     * keyword in both Swift and Kotlin and would force backtick-escaping at
+     * every call site.)
+     *
+     * When existing state is found, its persisted `dim`/`vocab_cap` win and
+     * the args here are ignored; they apply only to a fresh create.
+     */
+public static func loadOrCreate(path: String, dim: UInt32, vocabCap: UInt32, user: String)throws  -> MemoryPlant  {
+    return try  FfiConverterTypeMemoryPlant_lift(try rustCallWithError(FfiConverterTypeMpError_lift) {
+    uniffi_memory_plant_fn_constructor_memoryplant_load_or_create(
+        FfiConverterString.lower(path),
+        FfiConverterUInt32.lower(dim),
+        FfiConverterUInt32.lower(vocabCap),
+        FfiConverterString.lower(user),$0
+    )
+})
+}
     
 
     
@@ -992,7 +1017,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_memory_plant_checksum_method_memoryplant_total_facts() != 981) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_memory_plant_checksum_constructor_memoryplant_new() != 45760) {
+    if (uniffi_memory_plant_checksum_constructor_memoryplant_load_or_create() != 39311) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_memory_plant_checksum_constructor_memoryplant_new() != 40197) {
         return InitializationResult.apiChecksumMismatch
     }
 

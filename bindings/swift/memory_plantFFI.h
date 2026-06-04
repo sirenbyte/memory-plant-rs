@@ -253,6 +253,11 @@ uint64_t uniffi_memory_plant_fn_clone_memoryplant(uint64_t handle, RustCallStatu
 void uniffi_memory_plant_fn_free_memoryplant(uint64_t handle, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_CONSTRUCTOR_MEMORYPLANT_LOAD_OR_CREATE
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_CONSTRUCTOR_MEMORYPLANT_LOAD_OR_CREATE
+uint64_t uniffi_memory_plant_fn_constructor_memoryplant_load_or_create(RustBuffer path, uint32_t dim, uint32_t vocab_cap, RustBuffer user, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_CONSTRUCTOR_MEMORYPLANT_NEW
 #define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_FN_CONSTRUCTOR_MEMORYPLANT_NEW
 uint64_t uniffi_memory_plant_fn_constructor_memoryplant_new(uint32_t dim, uint32_t vocab_cap, RustBuffer user, RustCallStatus *_Nonnull out_status
@@ -603,6 +608,12 @@ uint16_t uniffi_memory_plant_checksum_method_memoryplant_store_fact(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_TOTAL_FACTS
 #define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_METHOD_MEMORYPLANT_TOTAL_FACTS
 uint16_t uniffi_memory_plant_checksum_method_memoryplant_total_facts(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_CONSTRUCTOR_MEMORYPLANT_LOAD_OR_CREATE
+#define UNIFFI_FFIDEF_UNIFFI_MEMORY_PLANT_CHECKSUM_CONSTRUCTOR_MEMORYPLANT_LOAD_OR_CREATE
+uint16_t uniffi_memory_plant_checksum_constructor_memoryplant_load_or_create(void
     
 );
 #endif

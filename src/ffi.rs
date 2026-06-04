@@ -58,12 +58,36 @@ pub struct MemoryPlant {
 
 #[uniffi::export]
 impl MemoryPlant {
-    /// New in-memory engine. Sane defaults: dim 512, vocab_cap 4096.
+    /// New, EMPTY in-memory engine (never touches disk). Use `open` for a
+    /// durable engine. Sane defaults: dim 512, vocab_cap 4096.
     #[uniffi::constructor]
     pub fn new(dim: u32, vocab_cap: u32, user: String) -> Arc<Self> {
         let factory = || -> Arc<dyn Extractor> { Arc::new(RegexExtractor::new()) };
         let svc = MemoryService::new(factory, dim as usize, vocab_cap as usize);
         Arc::new(Self { inner: Mutex::new(svc), user })
+    }
+
+    /// Open a DURABLE engine: load the state previously written by `save` at
+    /// `path`, or start fresh there if none exists yet (load-or-create). This
+    /// closes the cross-session round-trip — `loadOrCreate(path) → … → save(path)`
+    /// survives a process restart, so on-device memory is persistent.
+    ///
+    /// (Named `load_or_create`, not `open`, because `open` is a reserved
+    /// keyword in both Swift and Kotlin and would force backtick-escaping at
+    /// every call site.)
+    ///
+    /// When existing state is found, its persisted `dim`/`vocab_cap` win and
+    /// the args here are ignored; they apply only to a fresh create.
+    #[uniffi::constructor]
+    pub fn load_or_create(path: String, dim: u32, vocab_cap: u32, user: String) -> Result<Arc<Self>, MpError> {
+        let factory = || -> Arc<dyn Extractor> { Arc::new(RegexExtractor::new()) };
+        let has_state = std::path::Path::new(&path).join("service.json").exists();
+        let svc = if has_state {
+            MemoryService::load_state(&path, factory).map_err(MpError::from_err)?
+        } else {
+            MemoryService::new(factory, dim as usize, vocab_cap as usize)
+        };
+        Ok(Arc::new(Self { inner: Mutex::new(svc), user }))
     }
 
     pub fn store_fact(&self, predicate: String, value: String) -> Result<(), MpError> {
@@ -126,5 +150,26 @@ mod tests {
         assert_eq!(mp.recall_fact("works_as".into()).unwrap(), Some("engineer".into()));
         assert!(mp.forget_fact("works_as".into()).unwrap());
         assert_eq!(mp.recall_fact("works_as".into()).unwrap(), None);
+    }
+
+    #[test]
+    fn ffi_persistence_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap().to_string();
+        // Session 1: open-fresh, store, save.
+        {
+            let mp = MemoryPlant::load_or_create(path.clone(), 512, 256, "default".into()).unwrap();
+            mp.store_fact("lives_in".into(), "Almaty".into()).unwrap();
+            mp.save(path.clone()).unwrap();
+        }
+        // Session 2 (simulated restart): re-open from disk → fact is still there.
+        // (The engine normalises vocab values to lower-case, so "Almaty" → "almaty".)
+        let mp2 = MemoryPlant::load_or_create(path.clone(), 512, 256, "default".into()).unwrap();
+        assert_eq!(mp2.recall_fact("lives_in".into()).unwrap(), Some("almaty".into()));
+        // Forget persists too.
+        assert!(mp2.forget_fact("lives_in".into()).unwrap());
+        mp2.save(path.clone()).unwrap();
+        let mp3 = MemoryPlant::load_or_create(path, 512, 256, "default".into()).unwrap();
+        assert_eq!(mp3.recall_fact("lives_in".into()).unwrap(), None);
     }
 }
