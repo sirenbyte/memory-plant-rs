@@ -86,6 +86,7 @@ impl Encoder for MockEncoder {
 pub struct FastembedEncoder {
     model: std::sync::Mutex<fastembed::TextEmbedding>,
     dim: usize,
+    e5: bool,   // prepend e5 "query: "/"passage: " prefixes (multilingual ru/kz)
 }
 
 #[cfg(feature = "fastembed")]
@@ -101,6 +102,7 @@ impl FastembedEncoder {
         Ok(Self {
             model: std::sync::Mutex::new(model),
             dim: 384,
+            e5: false,
         })
     }
 
@@ -113,7 +115,34 @@ impl FastembedEncoder {
         let model = TextEmbedding::try_new(
             InitOptions::new(model_kind).with_show_download_progress(false),
         )?;
-        Ok(Self { model: std::sync::Mutex::new(model), dim })
+        Ok(Self { model: std::sync::Mutex::new(model), dim, e5: false })
+    }
+
+    /// Multilingual e5-small (Russian + Kazakh, on-device). 384-dim.
+    /// Use embed_query/embed_passage so the e5 prefixes are applied.
+    pub fn multilingual() -> Result<Self, fastembed::Error> {
+        use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+        let model = TextEmbedding::try_new(
+            InitOptions::new(EmbeddingModel::MultilingualE5Small)
+                .with_show_download_progress(false),
+        )?;
+        Ok(Self { model: std::sync::Mutex::new(model), dim: 384, e5: true })
+    }
+
+    fn embed_one(&self, text: String) -> Vec<f32> {
+        self.encode(&[text]).into_iter().next().unwrap_or_default()
+    }
+
+    /// Embed a search query (e5 models: "query: " prefix).
+    pub fn embed_query(&self, text: &str) -> Vec<f32> {
+        let t = if self.e5 { format!("query: {text}") } else { text.to_string() };
+        self.embed_one(t)
+    }
+
+    /// Embed a stored passage (e5 models: "passage: " prefix).
+    pub fn embed_passage(&self, text: &str) -> Vec<f32> {
+        let t = if self.e5 { format!("passage: {text}") } else { text.to_string() };
+        self.embed_one(t)
     }
 }
 
@@ -557,5 +586,33 @@ mod tests {
         let dm = make();
         let hits = dm.semantic_search::<fn(&DocumentEntry) -> bool>("anything", 5, None);
         assert!(hits.is_empty());
+    }
+}
+
+#[cfg(all(test, feature = "fastembed"))]
+mod e5_tests {
+    use super::*;
+
+    fn cos(a: &[f32], b: &[f32]) -> f32 {
+        let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+        let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if na == 0.0 || nb == 0.0 { 0.0 } else { dot / (na * nb) }
+    }
+
+    /// P3.2: multilingual e5 fixes ru/kz dense retrieval on-device (mirror of the
+    /// Python P0 test). Downloads MultilingualE5Small on first run.
+    #[test]
+    fn multilingual_ru_kz_ranks_correctly() {
+        let enc = FastembedEncoder::multilingual().expect("e5 model load");
+        let ru_author = enc.embed_passage("Роман «Война и мир» написал Лев Толстой.");
+        let kz_capital = enc.embed_passage("Қазақстанның астанасы — Астана қаласы.");
+        let en_distract = enc.embed_passage("The mitochondria is the powerhouse of the cell.");
+        let q_ru = enc.embed_query("Кто написал роман Война и мир?");
+        let q_kz = enc.embed_query("Қазақстанның астанасы қай қала?");
+        assert!(cos(&q_ru, &ru_author) > cos(&q_ru, &en_distract), "ru>en");
+        assert!(cos(&q_ru, &ru_author) > cos(&q_ru, &kz_capital), "ru>kz");
+        assert!(cos(&q_kz, &kz_capital) > cos(&q_kz, &en_distract), "kz>en");
+        assert!(cos(&q_kz, &kz_capital) > cos(&q_kz, &ru_author), "kz>ru");
     }
 }
