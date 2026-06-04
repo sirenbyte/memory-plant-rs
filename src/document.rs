@@ -35,7 +35,13 @@ use std::collections::HashMap;
 /// Anything that can turn `[String]` into `Vec<Vec<f32>>` of fixed
 /// dimensionality. Send + Sync so DocumentMemory is share-able.
 pub trait Encoder: Send + Sync {
+    /// Encode passages/documents (the storage path).
     fn encode(&self, texts: &[String]) -> Vec<Vec<f32>>;
+    /// Encode search queries. Default = same as `encode` (back-compat); e5-style
+    /// encoders override to apply the "query: " prefix (vs "passage: " for encode).
+    fn encode_query(&self, texts: &[String]) -> Vec<Vec<f32>> {
+        self.encode(texts)
+    }
     fn dim(&self) -> usize;
 }
 
@@ -129,31 +135,42 @@ impl FastembedEncoder {
         Ok(Self { model: std::sync::Mutex::new(model), dim: 384, e5: true })
     }
 
-    fn embed_one(&self, text: String) -> Vec<f32> {
-        self.encode(&[text]).into_iter().next().unwrap_or_default()
+    /// Raw model call, no prefix. encode()/encode_query() add the e5 prefixes.
+    fn encode_raw(&self, texts: Vec<String>) -> Vec<Vec<f32>> {
+        match self.model.lock() {
+            Ok(mut m) => m.embed(texts, None).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
     }
 
-    /// Embed a search query (e5 models: "query: " prefix).
+    /// Embed a single search query (e5 "query: " prefix when multilingual).
     pub fn embed_query(&self, text: &str) -> Vec<f32> {
-        let t = if self.e5 { format!("query: {text}") } else { text.to_string() };
-        self.embed_one(t)
+        self.encode_query(&[text.to_string()]).into_iter().next().unwrap_or_default()
     }
 
-    /// Embed a stored passage (e5 models: "passage: " prefix).
+    /// Embed a single stored passage (e5 "passage: " prefix when multilingual).
     pub fn embed_passage(&self, text: &str) -> Vec<f32> {
-        let t = if self.e5 { format!("passage: {text}") } else { text.to_string() };
-        self.embed_one(t)
+        self.encode(&[text.to_string()]).into_iter().next().unwrap_or_default()
     }
 }
 
 #[cfg(feature = "fastembed")]
 impl Encoder for FastembedEncoder {
-    fn encode(&self, texts: &[String]) -> Vec<Vec<f32>> {
-        let texts_owned: Vec<String> = texts.iter().cloned().collect();
-        match self.model.lock() {
-            Ok(mut m) => m.embed(texts_owned, None).unwrap_or_default(),
-            Err(_) => Vec::new(),
-        }
+    fn encode(&self, texts: &[String]) -> Vec<Vec<f32>> {           // passage path
+        let t: Vec<String> = if self.e5 {
+            texts.iter().map(|s| format!("passage: {s}")).collect()
+        } else {
+            texts.to_vec()
+        };
+        self.encode_raw(t)
+    }
+    fn encode_query(&self, texts: &[String]) -> Vec<Vec<f32>> {     // query path
+        let t: Vec<String> = if self.e5 {
+            texts.iter().map(|s| format!("query: {s}")).collect()
+        } else {
+            texts.to_vec()
+        };
+        self.encode_raw(t)
     }
     fn dim(&self) -> usize { self.dim }
 }
@@ -338,7 +355,7 @@ impl<E: Encoder> DocumentMemory<E> {
         if self.chunks.is_empty() {
             return Vec::new();
         }
-        let q_emb = self.encoder.encode(&[query.to_string()]);
+        let q_emb = self.encoder.encode_query(&[query.to_string()]);  // e5 "query: " prefix
         if q_emb.is_empty() {
             return Vec::new();
         }
@@ -614,5 +631,20 @@ mod e5_tests {
         assert!(cos(&q_ru, &ru_author) > cos(&q_ru, &kz_capital), "ru>kz");
         assert!(cos(&q_kz, &kz_capital) > cos(&q_kz, &en_distract), "kz>en");
         assert!(cos(&q_kz, &kz_capital) > cos(&q_kz, &ru_author), "kz>ru");
+    }
+
+    /// P3 step 1: end-to-end semantic_search with e5 query-prefix wiring —
+    /// a ru query retrieves the ru document over an en distractor.
+    #[test]
+    fn semantic_search_ru_with_e5_query_prefix() {
+        use std::collections::HashMap;
+        let enc = FastembedEncoder::multilingual().expect("e5 model load");
+        let mut dm = DocumentMemory::new(enc);
+        dm.add_document("ru", "Лев Толстой написал роман «Война и мир».", HashMap::new());
+        dm.add_document("en", "Photosynthesis converts light into chemical energy.", HashMap::new());
+        let hits = dm.semantic_search::<fn(&DocumentEntry) -> bool>(
+            "Кто автор романа Война и мир?", 5, None);
+        assert!(!hits.is_empty(), "expected hits");
+        assert_eq!(hits[0].doc_id, "ru", "ru query should retrieve ru doc first");
     }
 }
