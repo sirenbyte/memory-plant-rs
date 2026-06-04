@@ -1,10 +1,32 @@
-# Memory Plant — Rust port
+# memory-plant-rs — on-device memory engine
 
-Native-speed implementation of the Memory Plant associative-memory
-layer. Targets edge / on-device AI, server backends via FFI bindings,
+The **canonical Rust engine** for Memory Plant — the product track for a
+privacy-first, on-device pocket-AI assistant. Extracted from
+[`sirenbyte/MemoryPlant`](https://github.com/sirenbyte/MemoryPlant) (the Python
+reference / live MCP server) **with full commit history** via `git subtree`.
+
+Targets edge / on-device AI (UniFFI iOS + Android), server backends via FFI,
 and WASM.
 
-## Status
+## Current capabilities
+
+- **HLB core** — `bind`/`unbind`/`normalize`/cosine, ±1 roles, **provable
+  algebraic forget** (GDPR), ~5–7 B/fact compression.
+- **Facts** — `PersonalMemory` store/recall/ingest/forget, vocab mgmt.
+- **Document RAG** — chunking, caller-embedded `add_document` + rich `search`
+  (metadata / contains_text / min_score / doc_ids); multilingual e5
+  (`--features fastembed`) or caller-supplied vectors (ORT-free on device).
+- **Persistence** — plaintext JSON, **redb** KV, and **ChaCha20-Poly1305
+  at-rest encryption** (`save_sealed`/`load_or_create_sealed`).
+- **Vector index** — exact brute-force default, optional HNSW (`--features ann`).
+- **Mobile bindings** — UniFFI Swift/Kotlin + iOS `xcframework`. See
+  [`bindings/README.md`](bindings/README.md), [`CROSS_COMPILE.md`](CROSS_COMPILE.md).
+- **Benchmark** — retrieval R@1=0.964 / MRR=0.982 on a curated ru-heavy set
+  (see [`BENCH.md`](BENCH.md); honest scope — retrieval-only, not LongMemEval).
+
+113 tests green (`cargo test`).
+
+## Legacy roadmap (historical)
 
 **Phase 0 — HLB core**: ✅ done. `bind`, `unbind`, `normalize`,
 `cosine_similarity`, `random_hlb_role`, plus a superposition + AMP

@@ -1,1 +1,16 @@
-rust/python-bindings/target/
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# ONNX model cache (regenerable; do not commit)
+.fastembed_cache/
+
+# iOS build artifacts (200 MB static libs + assembled xcframework) — regenerate
+# via the recipe in bindings/README.md.
+bindings/ios/
+
+# pyo3 python-bindings build artifacts
+python-bindings/target/
+python-bindings/Cargo.lock
+
+.DS_Store
