@@ -21,11 +21,14 @@
 //! reference at the same recall.
 
 use memory_plant::{
-    AdaptiveMemory, Fact as MpFact, PersonalMemory, RegexExtractor,
+    chunk_text, AdaptiveMemory, DocumentMemory, Fact as MpFact, MockEncoder, PersonalMemory,
+    RegexExtractor, SearchFilter, SearchHit,
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use pyo3::wrap_pyfunction;
+use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -190,6 +193,110 @@ fn fact_to_dict(py: Python<'_>, f: &MpFact) -> PyResult<Py<PyDict>> {
 }
 
 // ============================================================
+// DocumentMemory  (RAG: precomputed embeddings + semantic search)
+// ============================================================
+
+/// Document/RAG store. The Qwen side computes embeddings (e5 via MLX) and
+/// passes them in; this store only does the PRECOMPUTED path + cosine search,
+/// so its internal encoder is a no-op `MockEncoder` and is never invoked.
+#[pyclass(name = "DocumentMemory")]
+struct PyDocumentMemory {
+    inner: DocumentMemory<MockEncoder>,
+    n_chunks: usize,
+}
+
+#[pymethods]
+impl PyDocumentMemory {
+    /// DocumentMemory(dim=384). dim must match the embedder (multilingual-e5-small = 384).
+    #[new]
+    #[pyo3(signature = (dim = 384))]
+    fn new(dim: usize) -> Self {
+        Self { inner: DocumentMemory::new(MockEncoder::new(dim)), n_chunks: 0 }
+    }
+
+    /// Store a document: pre-chunked text + matching precomputed embeddings
+    /// (chunks[i] <-> embeddings[i]). metadata: optional {str: str}. Returns #chunks.
+    #[pyo3(signature = (doc_id, chunks, embeddings, metadata = None))]
+    fn add_document(
+        &mut self,
+        doc_id: String,
+        chunks: Vec<String>,
+        embeddings: Vec<Vec<f32>>,
+        metadata: Option<HashMap<String, String>>,
+    ) -> usize {
+        let md: HashMap<String, JsonValue> = metadata
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(k, v)| (k, JsonValue::String(v)))
+            .collect();
+        let added = self
+            .inner
+            .add_document_with_embeddings(doc_id, chunks, embeddings, md);
+        self.n_chunks += added;
+        added
+    }
+
+    /// Semantic search with a PRECOMPUTED query embedding. Returns a list of
+    /// dicts {chunk_id, doc_id, score, text}, best first.
+    #[pyo3(signature = (query_emb, k = 5, min_score = None, doc_ids = None))]
+    fn search(
+        &self,
+        py: Python<'_>,
+        query_emb: Vec<f32>,
+        k: usize,
+        min_score: Option<f32>,
+        doc_ids: Option<Vec<String>>,
+    ) -> PyResult<Vec<Py<PyDict>>> {
+        let filter = SearchFilter { min_score, doc_ids, ..Default::default() };
+        self.inner
+            .search(&query_emb, k, &filter)
+            .iter()
+            .map(|h| hit_to_dict(py, h))
+            .collect()
+    }
+
+    /// Persist to disk; reload with DocumentMemory.load(path, dim).
+    fn save(&self, path: &str) -> PyResult<()> {
+        self.inner
+            .save_state(path)
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    /// Load a previously saved store. dim must match what it was built with.
+    #[staticmethod]
+    #[pyo3(signature = (path, dim = 384))]
+    fn load(path: &str, dim: usize) -> PyResult<Self> {
+        let inner = DocumentMemory::load_state(path, MockEncoder::new(dim))
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(Self { inner, n_chunks: 0 })
+    }
+
+    #[getter]
+    fn n_chunks(&self) -> usize { self.n_chunks }
+
+    fn __repr__(&self) -> String {
+        format!("DocumentMemory(n_chunks={})", self.n_chunks)
+    }
+}
+
+fn hit_to_dict(py: Python<'_>, h: &SearchHit) -> PyResult<Py<PyDict>> {
+    let d = PyDict::new_bound(py);
+    d.set_item("chunk_id", &h.chunk_id)?;
+    d.set_item("doc_id", &h.doc_id)?;
+    d.set_item("score", h.score)?;
+    d.set_item("text", &h.text)?;
+    Ok(d.unbind())
+}
+
+/// chunk_text(text, chunk_size=200, chunk_overlap=20) -> list[str]
+/// Paragraph/sentence-aware chunking (pure Rust). Pairs with embed(passage).
+#[pyfunction]
+#[pyo3(name = "chunk_text", signature = (text, chunk_size = 200, chunk_overlap = 20))]
+fn chunk_text_py(text: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<String> {
+    chunk_text(text, chunk_size, chunk_overlap)
+}
+
+// ============================================================
 // Module entry point
 // ============================================================
 
@@ -197,6 +304,8 @@ fn fact_to_dict(py: Python<'_>, f: &MpFact) -> PyResult<Py<PyDict>> {
 fn memory_plant_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyAdaptiveMemory>()?;
     m.add_class::<PyPersonalMemory>()?;
+    m.add_class::<PyDocumentMemory>()?;
+    m.add_function(wrap_pyfunction!(chunk_text_py, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

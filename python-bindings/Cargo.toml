@@ -17,3 +17,5 @@ memory-plant = { path = ".." }
 # Python interop. abi3 = stable ABI — one wheel works across all
 # CPython 3.9+. Avoids rebuilding per-minor-version.
 pyo3 = { version = "0.22", features = ["extension-module", "abi3-py39"] }
+# Document metadata values are serde_json::Value in the core API.
+serde_json = "1"
